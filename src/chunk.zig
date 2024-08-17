@@ -21,6 +21,12 @@ pub const Chunk = struct {
         };
     }
 
+    pub fn deinit(self: Chunk) void {
+        self.code.deinit();
+        self.constants.deinit();
+        self.lines.deinit();
+    }
+
     pub fn write_code(self: *Chunk, byte: u8, line: usize) !void {
         try self.code.append(byte);
         try self.lines.append(line);
@@ -33,11 +39,9 @@ pub const Chunk = struct {
 };
 
 test "chunk" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const allocator = arena.allocator();
-    defer arena.deinit();
-
+    const allocator = std.testing.allocator;
     var chunk = Chunk.init(allocator);
+    defer chunk.deinit();
 
     const index: usize = try chunk.add_constant(1.2);
     try chunk.write_code(@intFromEnum(OpCode.OpConstant), 123);
