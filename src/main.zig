@@ -3,15 +3,17 @@ const chk = @import("chunk.zig");
 const dbg = @import("debug.zig");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    defer {
-        const status = gpa.deinit();
-        if (status == .leak) std.debug.print("Memory leak detected!\n", .{});
-    }
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
 
     var chunk = chk.Chunk.init(allocator);
-    try chunk.append(chk.OpCode.OpReturn);
 
-    try dbg.disasemble_chunk(chunk, "test chunk");
+    try chunk.write_code(chk.Code{ .op_code = chk.OpCode.OpReturn });
+
+    const index: usize = try chunk.add_constant(1.2);
+    try chunk.write_code(chk.Code{ .op_code = chk.OpCode.OpConstant });
+    try chunk.write_code(chk.Code{ .index = @intCast(index) });
+
+    try dbg.disasemble_chunk(chunk, "Test Chunk");
 }
