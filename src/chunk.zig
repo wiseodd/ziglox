@@ -8,11 +8,6 @@ pub const OpCode = enum(u8) {
     OpReturn,
 };
 
-pub const Code = union(enum) {
-    op_code: OpCode,
-    index: u8,
-};
-
 pub const Chunk = struct {
     code: std.ArrayList(u8),
     constants: val.ValueArray,
@@ -26,11 +21,8 @@ pub const Chunk = struct {
         };
     }
 
-    pub fn write_code(self: *Chunk, byte: Code, line: usize) !void {
-        switch (byte) {
-            .op_code => |code| try self.code.append(@intFromEnum(code)),
-            .index => |code| try self.code.append(code),
-        }
+    pub fn write_code(self: *Chunk, byte: u8, line: usize) !void {
+        try self.code.append(byte);
         try self.lines.append(line);
     }
 
@@ -48,13 +40,16 @@ test "chunk" {
     var chunk = Chunk.init(allocator);
 
     const index: usize = try chunk.add_constant(1.2);
-    try chunk.write_code(Code{ .op_code = OpCode.OpConstant }, 123);
-    try chunk.write_code(Code{ .index = @intCast(index) }, 123);
-    try chunk.write_code(Code{ .op_code = OpCode.OpReturn }, 123);
+    try chunk.write_code(@intFromEnum(OpCode.OpConstant), 123);
+    try chunk.write_code(@intCast(index), 123);
+    try chunk.write_code(@intFromEnum(OpCode.OpReturn), 123);
 
     try expect(chunk.code.items.len == 3);
     try expect(std.mem.eql(u8, chunk.code.items, &([_]u8{ @intFromEnum(OpCode.OpConstant), 0, @intFromEnum(OpCode.OpReturn) })));
 
     try expect(chunk.constants.items.len == 1);
     try expect(chunk.constants.items[0] == 1.2);
+
+    try expect(chunk.lines.items.len == 3);
+    try expect(std.mem.eql(usize, chunk.lines.items, &([_]usize{ 123, 123, 123 })));
 }
