@@ -1,4 +1,6 @@
 const std = @import("std");
+const expect = std.testing.expect;
+
 const chk = @import("chunk.zig");
 const val = @import("value.zig");
 
@@ -13,6 +15,12 @@ pub fn disasemble_chunk(chunk: chk.Chunk, name: []const u8) !void {
 
 pub fn disassemble_instruction(chunk: chk.Chunk, offset: usize) usize {
     std.debug.print("{:0>4} ", .{offset});
+
+    if (offset > 0 and chunk.lines.items[offset] == chunk.lines.items[offset - 1]) {
+        std.debug.print("   | ", .{});
+    } else {
+        std.debug.print("{d:>4} ", .{chunk.lines.items[offset]});
+    }
 
     const instruction: chk.OpCode = @enumFromInt(chunk.code.items[offset]);
     switch (instruction) {
@@ -29,7 +37,7 @@ fn simple_instruction(name: []const u8, offset: usize) usize {
 fn constant_instruction(name: []const u8, chunk: chk.Chunk, offset: usize) usize {
     const index: u8 = chunk.code.items[offset + 1];
 
-    std.debug.print("{s:<16} {d:<4} '", .{ name, index });
+    std.debug.print("{s:<16} {d:>4} '", .{ name, index });
     val.print_value(chunk.constants.items[index]);
     std.debug.print("'\n", .{});
 

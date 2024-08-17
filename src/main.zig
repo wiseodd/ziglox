@@ -9,11 +9,15 @@ pub fn main() !void {
 
     var chunk = chk.Chunk.init(allocator);
 
-    try chunk.write_code(chk.Code{ .op_code = chk.OpCode.OpReturn });
-
     const index: usize = try chunk.add_constant(1.2);
-    try chunk.write_code(chk.Code{ .op_code = chk.OpCode.OpConstant });
-    try chunk.write_code(chk.Code{ .index = @intCast(index) });
+    try chunk.write_code(chk.Code{ .op_code = chk.OpCode.OpConstant }, 123);
+    try chunk.write_code(chk.Code{ .index = @intCast(index) }, 123);
+    try chunk.write_code(chk.Code{ .op_code = chk.OpCode.OpReturn }, 123);
 
     try dbg.disasemble_chunk(chunk, "Test Chunk");
+}
+
+// Gather all tests
+test {
+    std.testing.refAllDecls(@This());
 }
