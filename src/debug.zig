@@ -1,6 +1,4 @@
 const std = @import("std");
-const expect = std.testing.expect;
-
 const chk = @import("chunk.zig");
 const val = @import("value.zig");
 
@@ -9,16 +7,19 @@ pub fn disasemble_chunk(chunk: chk.Chunk, name: []const u8) !void {
 
     var offset: usize = 0;
     while (offset < chunk.code.items.len) {
+        // Offset is advanced when reading instruction
         offset = disassemble_instruction(chunk, offset);
     }
 }
 
 pub fn disassemble_instruction(chunk: chk.Chunk, offset: usize) usize {
+    // Right-aligned padding of zeros of length 4
     std.debug.print("{:0>4} ", .{offset});
 
     if (offset > 0 and chunk.lines.items[offset] == chunk.lines.items[offset - 1]) {
         std.debug.print("   | ", .{});
     } else {
+        // Right-aligned padding of spaces of length 4
         std.debug.print("{d:>4} ", .{chunk.lines.items[offset]});
     }
 
@@ -35,6 +36,10 @@ fn simple_instruction(name: []const u8, offset: usize) usize {
 }
 
 fn constant_instruction(name: []const u8, chunk: chk.Chunk, offset: usize) usize {
+    // Constants are stored in the bytecode chunk as 2 bytes:
+    // The first byte is to specify that instruction "OP_CONSTANT".
+    // The second one is to specify the index in chunk.constants where the constant
+    // value is stored.
     const index: u8 = chunk.code.items[offset + 1];
 
     std.debug.print("{s:<16} {d:>4} '", .{ name, index });

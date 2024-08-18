@@ -29,6 +29,7 @@ pub const VirtualMachine = struct {
     }
 
     fn run(self: *VirtualMachine) InterpretError!void {
+        // Note that self.read_byte() advances the pointer
         while (true) {
             const instruction: chk.OpCode = @enumFromInt(self.read_byte());
 
@@ -44,7 +45,7 @@ pub const VirtualMachine = struct {
         }
     }
 
-    // inline function to emulate C macro
+    // Inline function to emulate C macro
     inline fn read_byte(self: *VirtualMachine) u8 {
         // self.ip is a many-item pointer. The first element points to start of the
         // slice.
