@@ -10,7 +10,7 @@ pub const InterpretError = error{
 
 pub const VirtualMachine = struct {
     chunk: chk.Chunk,
-    ip: usize,
+    ip: [*]u8,
 
     pub fn init() VirtualMachine {
         return VirtualMachine{
@@ -23,7 +23,8 @@ pub const VirtualMachine = struct {
 
     pub fn interpret(self: *VirtualMachine, chunk: chk.Chunk) InterpretError!void {
         self.chunk = chunk;
-        self.ip = 0;
+        // Initialize self.ip with the pointers of the slice/array.
+        self.ip = chunk.code.items.ptr;
         return self.run();
     }
 
@@ -43,8 +44,13 @@ pub const VirtualMachine = struct {
         }
     }
 
-    fn read_byte(self: *VirtualMachine) u8 {
-        const value: u8 = self.chunk.code.items[self.ip];
+    // inline function to emulate C macro
+    inline fn read_byte(self: *VirtualMachine) u8 {
+        // self.ip is a many-item pointer. The first element points to start of the
+        // slice.
+        const value: u8 = self.ip[0];
+        // Pointer arithmetic below. We advance self.ip to the pointer of the next
+        // element in the slice.
         self.ip += 1;
         return value;
     }
