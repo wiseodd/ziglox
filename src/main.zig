@@ -8,8 +8,8 @@ pub fn main() !void {
     const allocator = arena.allocator();
     defer arena.deinit();
 
-    var virtual_machine = vm.VirtualMachine.init();
-    // defer virtual_machine.deinit();
+    var virtual_machine = vm.VirtualMachine.init(allocator);
+    defer virtual_machine.deinit();
 
     var chunk = chk.Chunk.init(allocator);
     defer chunk.deinit();

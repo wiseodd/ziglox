@@ -1,9 +1,13 @@
 const std = @import("std");
 
-const chk = @import("chunk.zig");
-const val = @import("value.zig");
-const dbg = @import("debug.zig");
-const flg = @import("flags.zig");
+const Chunk = @import("chunk.zig").Chunk;
+const OpCode = @import("chunk.zig").OpCode;
+
+const Value = @import("value.zig").Value;
+const print_value = @import("value.zig").print_value;
+
+const debug = @import("debug.zig");
+const flags = @import("flags.zig");
 
 pub const InterpretError = error{
     CompileError,
@@ -11,19 +15,23 @@ pub const InterpretError = error{
 };
 
 pub const VirtualMachine = struct {
-    chunk: chk.Chunk,
+    chunk: Chunk,
     ip: [*]u8,
+    stack: std.ArrayList(Value),
 
-    pub fn init() VirtualMachine {
+    pub fn init(allocator: std.mem.Allocator) VirtualMachine {
         return VirtualMachine{
             .chunk = undefined,
             .ip = undefined,
+            .stack = std.ArrayList(Value).init(allocator),
         };
     }
 
-    // pub fn deinit(self: *VirtualMachine) !void {}
+    pub fn deinit(self: *VirtualMachine) void {
+        self.stack.deinit();
+    }
 
-    pub fn interpret(self: *VirtualMachine, chunk: chk.Chunk) InterpretError!void {
+    pub fn interpret(self: *VirtualMachine, chunk: Chunk) InterpretError!void {
         self.chunk = chunk;
         // Initialize self.ip with the pointers of the slice/array.
         self.ip = chunk.code.items.ptr;
@@ -33,24 +41,40 @@ pub const VirtualMachine = struct {
     fn run(self: *VirtualMachine) InterpretError!void {
         // Note that self.read_byte() advances the pointer
         while (true) {
-            if (flg.DEBUG_TRACE_EXECUTION) {
+            if (flags.DEBUG_TRACE_EXECUTION) {
+                std.debug.print("          ", .{});
+                for (self.stack.items) |slot| {
+                    std.debug.print("[ ", .{});
+                    print_value(slot);
+                    std.debug.print(" ]", .{});
+                }
+                std.debug.print("\n", .{});
+
                 // @intFromPtr converts a pointer to its usize address.
                 // Since arrays are contiguous, we can compute the distance from the
                 // first element.
                 const offset: usize = @intFromPtr(self.ip) - @intFromPtr(self.chunk.code.items.ptr);
-                _ = dbg.disassemble_instruction(self.chunk, offset);
+                _ = debug.disassemble_instruction(self.chunk, offset);
             }
 
-            const instruction: chk.OpCode = @enumFromInt(self.read_byte());
+            const instruction: OpCode = @enumFromInt(self.read_byte());
 
             switch (instruction) {
-                chk.OpCode.OpConstant => {
-                    const constant: val.Value = self.read_constant();
-                    val.print_value(constant);
+                OpCode.OpConstant => {
+                    const constant: Value = self.read_constant();
+                    self.stack.append(constant) catch |err| switch (err) {
+                        std.mem.Allocator.Error.OutOfMemory => {
+                            std.debug.print("Stack overflow!\n", .{});
+                            return error.RuntimeError;
+                        },
+                    };
+                    return;
+                },
+                OpCode.OpReturn => {
+                    print_value(self.stack.pop());
                     std.debug.print("\n", .{});
                     return;
                 },
-                chk.OpCode.OpReturn => return,
             }
         }
     }
@@ -66,7 +90,7 @@ pub const VirtualMachine = struct {
         return value;
     }
 
-    inline fn read_constant(self: *VirtualMachine) val.Value {
+    inline fn read_constant(self: *VirtualMachine) Value {
         return self.chunk.constants.items[self.read_byte()];
     }
 };
