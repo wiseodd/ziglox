@@ -1,25 +1,40 @@
 const std = @import("std");
-const chk = @import("chunk.zig");
-const dbg = @import("debug.zig");
-const vm = @import("vm.zig");
+const Chunk = @import("chunk.zig").Chunk;
+const OpCode = @import("chunk.zig").OpCode;
+const debug = @import("debug.zig");
+const VirtualMachine = @import("vm.zig").VirtualMachine;
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = arena.allocator();
     defer arena.deinit();
 
-    var virtual_machine = vm.VirtualMachine.init(allocator);
+    var virtual_machine = VirtualMachine.init(allocator);
     defer virtual_machine.deinit();
 
-    var chunk = chk.Chunk.init(allocator);
+    var chunk = Chunk.init(allocator);
     defer chunk.deinit();
 
-    const index: usize = try chunk.add_constant(1.2);
-    try chunk.write_code(@intFromEnum(chk.OpCode.OpConstant), 123);
+    var index: usize = try chunk.add_constant(1.2);
+    try chunk.write_code(@intFromEnum(OpCode.OpConstant), 123);
     try chunk.write_code(@intCast(index), 123);
-    try chunk.write_code(@intFromEnum(chk.OpCode.OpReturn), 123);
 
-    try dbg.disasemble_chunk(chunk, "Test Chunk");
+    index = try chunk.add_constant(3.4);
+    try chunk.write_code(@intFromEnum(OpCode.OpConstant), 123);
+    try chunk.write_code(@intCast(index), 123);
+
+    try chunk.write_code(@intFromEnum(OpCode.OpAdd), 123);
+
+    index = try chunk.add_constant(5.6);
+    try chunk.write_code(@intFromEnum(OpCode.OpConstant), 123);
+    try chunk.write_code(@intCast(index), 123);
+
+    try chunk.write_code(@intFromEnum(OpCode.OpDivide), 123);
+    try chunk.write_code(@intFromEnum(OpCode.OpNegate), 123);
+
+    try chunk.write_code(@intFromEnum(OpCode.OpReturn), 123);
+
+    // try debug.disasemble_chunk(chunk, "Test Chunk");
     try virtual_machine.interpret(chunk);
 }
 

@@ -5,6 +5,11 @@ const val = @import("value.zig");
 
 pub const OpCode = enum(u8) {
     OpConstant,
+    OpAdd,
+    OpSubstract,
+    OpMultiply,
+    OpDivide,
+    OpNegate,
     OpReturn,
 };
 

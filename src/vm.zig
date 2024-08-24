@@ -62,13 +62,18 @@ pub const VirtualMachine = struct {
             switch (instruction) {
                 OpCode.OpConstant => {
                     const constant: Value = self.read_constant();
-                    self.stack.append(constant) catch |err| switch (err) {
-                        std.mem.Allocator.Error.OutOfMemory => {
-                            std.debug.print("Stack overflow!\n", .{});
-                            return error.RuntimeError;
-                        },
+                    self.stack.append(constant) catch {
+                        return InterpretError.RuntimeError;
                     };
-                    return;
+                },
+                OpCode.OpAdd => try self.binary_op(OpCode.OpAdd),
+                OpCode.OpSubstract => try self.binary_op(OpCode.OpSubstract),
+                OpCode.OpMultiply => try self.binary_op(OpCode.OpMultiply),
+                OpCode.OpDivide => try self.binary_op(OpCode.OpDivide),
+                OpCode.OpNegate => {
+                    self.stack.append(-self.stack.pop()) catch {
+                        return InterpretError.RuntimeError;
+                    };
                 },
                 OpCode.OpReturn => {
                     print_value(self.stack.pop());
@@ -92,5 +97,21 @@ pub const VirtualMachine = struct {
 
     inline fn read_constant(self: *VirtualMachine) Value {
         return self.chunk.constants.items[self.read_byte()];
+    }
+
+    inline fn binary_op(self: *VirtualMachine, op: OpCode) InterpretError!void {
+        // The first-popped value is val2 since it's a stack (LIFO)
+        const val2: Value = self.stack.pop();
+        const val1: Value = self.stack.pop();
+        const res: Value = switch (op) {
+            OpCode.OpAdd => val1 + val2,
+            OpCode.OpSubstract => val1 - val2,
+            OpCode.OpMultiply => val1 * val2,
+            OpCode.OpDivide => val1 / val2,
+            else => return InterpretError.RuntimeError,
+        };
+        self.stack.append(res) catch {
+            return InterpretError.RuntimeError;
+        };
     }
 };
