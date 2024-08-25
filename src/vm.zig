@@ -75,8 +75,12 @@ pub const VirtualMachine = struct {
                 },
                 OpCode.OpReturn => {
                     const retval: Value = self.stack.pop();
-                    print_value(retval);
-                    std.debug.print("\n", .{});
+
+                    if (flags.DEBUG_TRACE_EXECUTION) {
+                        print_value(retval);
+                        std.debug.print("\n", .{});
+                    }
+
                     return retval;
                 },
             }
