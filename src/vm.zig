@@ -1,11 +1,9 @@
 const std = @import("std");
-
+const expect = std.testing.expect;
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
-
 const Value = @import("value.zig").Value;
 const print_value = @import("value.zig").print_value;
-
 const debug = @import("debug.zig");
 const flags = @import("flags.zig");
 
@@ -31,14 +29,14 @@ pub const VirtualMachine = struct {
         self.stack.deinit();
     }
 
-    pub fn interpret(self: *VirtualMachine, chunk: Chunk) InterpretError!void {
+    pub fn interpret(self: *VirtualMachine, chunk: Chunk) InterpretError!Value {
         self.chunk = chunk;
         // Initialize self.ip with the pointers of the slice/array.
         self.ip = chunk.code.items.ptr;
         return self.run();
     }
 
-    fn run(self: *VirtualMachine) InterpretError!void {
+    fn run(self: *VirtualMachine) InterpretError!Value {
         // Note that self.read_byte() advances the pointer
         while (true) {
             if (flags.DEBUG_TRACE_EXECUTION) {
@@ -76,9 +74,10 @@ pub const VirtualMachine = struct {
                     };
                 },
                 OpCode.OpReturn => {
-                    print_value(self.stack.pop());
+                    const retval: Value = self.stack.pop();
+                    print_value(retval);
                     std.debug.print("\n", .{});
-                    return;
+                    return retval;
                 },
             }
         }
@@ -115,3 +114,115 @@ pub const VirtualMachine = struct {
         };
     }
 };
+
+fn test_init_chunk(chunk: *Chunk) !void {
+    var index: usize = try chunk.add_constant(1.2);
+    try chunk.write_code(@intFromEnum(OpCode.OpConstant), 123);
+    try chunk.write_code(@intCast(index), 123);
+
+    index = try chunk.add_constant(3.4);
+    try chunk.write_code(@intFromEnum(OpCode.OpConstant), 123);
+    try chunk.write_code(@intCast(index), 123);
+
+    try chunk.write_code(@intFromEnum(OpCode.OpAdd), 123);
+
+    index = try chunk.add_constant(5.6);
+    try chunk.write_code(@intFromEnum(OpCode.OpConstant), 123);
+    try chunk.write_code(@intCast(index), 123);
+
+    try chunk.write_code(@intFromEnum(OpCode.OpDivide), 123);
+    try chunk.write_code(@intFromEnum(OpCode.OpNegate), 123);
+
+    try chunk.write_code(@intFromEnum(OpCode.OpReturn), 123);
+}
+
+test "vm_init" {
+    const allocator = std.testing.allocator;
+    var vm = VirtualMachine.init(allocator);
+    defer vm.deinit();
+
+    try expect(vm.stack.items.len == 0);
+}
+
+test "vm_run" {
+    const allocator = std.testing.allocator;
+    var vm = VirtualMachine.init(allocator);
+    var chunk = Chunk.init(allocator);
+    defer vm.deinit();
+    defer chunk.deinit();
+
+    try test_init_chunk(&chunk);
+
+    const result: Value = try vm.interpret(chunk);
+    try expect(result == -0.8214285714285714);
+}
+
+test "vm_read_byte" {
+    const allocator = std.testing.allocator;
+    var vm = VirtualMachine.init(allocator);
+    var chunk = Chunk.init(allocator);
+    defer vm.deinit();
+    defer chunk.deinit();
+
+    try test_init_chunk(&chunk);
+
+    vm.chunk = chunk;
+    vm.ip = chunk.code.items.ptr;
+
+    const expectations = [_]OpCode{ OpCode.OpConstant, OpCode.OpConstant, OpCode.OpAdd };
+
+    for (expectations) |exp| {
+        const instruction: OpCode = @enumFromInt(vm.read_byte());
+        try expect(instruction == exp);
+        _ = vm.read_byte();
+    }
+}
+
+test "vm_read_const" {
+    const allocator = std.testing.allocator;
+    var vm = VirtualMachine.init(allocator);
+    var chunk = Chunk.init(allocator);
+    defer vm.deinit();
+    defer chunk.deinit();
+
+    try test_init_chunk(&chunk);
+
+    vm.chunk = chunk;
+    vm.ip = chunk.code.items.ptr;
+
+    const expectations = [_]Value{ 1.2, 3.4 };
+
+    for (expectations) |exp| {
+        _ = vm.read_byte();
+        const constant: Value = vm.read_constant();
+        try expect(constant == exp);
+    }
+}
+
+test "vm_binary_op" {
+    const allocator = std.testing.allocator;
+    var vm = VirtualMachine.init(allocator);
+    defer vm.deinit();
+
+    try vm.stack.append(6);
+    try vm.stack.append(3);
+    try expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 6, 3 }));
+
+    try vm.binary_op(OpCode.OpAdd);
+    try expect(std.mem.eql(Value, vm.stack.items, &[1]Value{9}));
+
+    try vm.stack.append(4);
+    try expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 9, 4 }));
+    try vm.binary_op(OpCode.OpSubstract);
+    try expect(std.mem.eql(Value, vm.stack.items, &[1]Value{5}));
+
+    try vm.stack.append(3.2);
+    try expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 5, 3.2 }));
+    try vm.binary_op(OpCode.OpMultiply);
+    try expect(std.mem.eql(Value, vm.stack.items, &[1]Value{16}));
+
+    try vm.stack.append(8.0);
+    try expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 16, 8 }));
+    try vm.binary_op(OpCode.OpDivide);
+    try expect(std.mem.eql(Value, vm.stack.items, &[1]Value{2}));
+}
