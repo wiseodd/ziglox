@@ -1,5 +1,4 @@
 const std = @import("std");
-const expect = std.testing.expect;
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
 const Value = @import("value.zig").Value;
@@ -30,6 +29,10 @@ pub const VirtualMachine = struct {
     }
 
     pub fn interpret(self: *VirtualMachine, chunk: Chunk) InterpretError!Value {
+        if (chunk.code.items.len == 0) {
+            return InterpretError.RuntimeError;
+        }
+
         self.chunk = chunk;
         // Initialize self.ip with the pointers of the slice/array.
         self.ip = chunk.code.items.ptr;
@@ -145,7 +148,17 @@ test "vm_init" {
     var vm = VirtualMachine.init(allocator);
     defer vm.deinit();
 
-    try expect(vm.stack.items.len == 0);
+    try std.testing.expect(vm.stack.items.len == 0);
+}
+
+test "vm_run_empty_chunk" {
+    const allocator = std.testing.allocator;
+    var vm = VirtualMachine.init(allocator);
+    var chunk = Chunk.init(allocator);
+    defer vm.deinit();
+    defer chunk.deinit();
+
+    try std.testing.expectError(InterpretError.RuntimeError, vm.interpret(chunk));
 }
 
 test "vm_run" {
@@ -158,7 +171,7 @@ test "vm_run" {
     try test_init_chunk(&chunk);
 
     const result: Value = try vm.interpret(chunk);
-    try expect(result == -0.8214285714285714);
+    try std.testing.expect(result == -0.8214285714285714);
 }
 
 test "vm_read_byte" {
@@ -177,7 +190,7 @@ test "vm_read_byte" {
 
     for (expectations) |exp| {
         const instruction: OpCode = @enumFromInt(vm.read_byte());
-        try expect(instruction == exp);
+        try std.testing.expect(instruction == exp);
         _ = vm.read_byte();
     }
 }
@@ -199,7 +212,7 @@ test "vm_read_const" {
     for (expectations) |exp| {
         _ = vm.read_byte();
         const constant: Value = vm.read_constant();
-        try expect(constant == exp);
+        try std.testing.expect(constant == exp);
     }
 }
 
@@ -210,23 +223,23 @@ test "vm_binary_op" {
 
     try vm.stack.append(6);
     try vm.stack.append(3);
-    try expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 6, 3 }));
+    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 6, 3 }));
 
     try vm.binary_op(OpCode.OpAdd);
-    try expect(std.mem.eql(Value, vm.stack.items, &[1]Value{9}));
+    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[1]Value{9}));
 
     try vm.stack.append(4);
-    try expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 9, 4 }));
+    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 9, 4 }));
     try vm.binary_op(OpCode.OpSubstract);
-    try expect(std.mem.eql(Value, vm.stack.items, &[1]Value{5}));
+    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[1]Value{5}));
 
     try vm.stack.append(3.2);
-    try expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 5, 3.2 }));
+    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 5, 3.2 }));
     try vm.binary_op(OpCode.OpMultiply);
-    try expect(std.mem.eql(Value, vm.stack.items, &[1]Value{16}));
+    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[1]Value{16}));
 
     try vm.stack.append(8.0);
-    try expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 16, 8 }));
+    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 16, 8 }));
     try vm.binary_op(OpCode.OpDivide);
-    try expect(std.mem.eql(Value, vm.stack.items, &[1]Value{2}));
+    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[1]Value{2}));
 }
