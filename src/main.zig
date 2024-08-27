@@ -52,7 +52,7 @@ fn repl(vm: *VirtualMachine, allocator: std.mem.Allocator) !void {
 
 fn run_file(path: []const u8, vm: *VirtualMachine, allocator: std.mem.Allocator) !void {
     const source: []u8 = read_file(path, allocator);
-    std.debug.print("{s}", .{source});
+    defer allocator.free(source);
 
     const chunk = Chunk.init(allocator);
     defer chunk.deinit();
@@ -78,7 +78,7 @@ fn read_file(path: []const u8, allocator: std.mem.Allocator) []u8 {
     defer file.close();
 
     const stat: std.fs.File.Stat = file.stat() catch {
-        std.log.err("Failed to metadata of \"{s}\".\n", .{path});
+        std.log.err("Failed to get metadata of \"{s}\".\n", .{path});
         std.process.exit(74);
     };
     const buffer: []u8 = file.readToEndAlloc(allocator, stat.size) catch {
