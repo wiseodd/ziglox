@@ -5,6 +5,7 @@ const Value = @import("value.zig").Value;
 const print_value = @import("value.zig").print_value;
 const debug = @import("debug.zig");
 const flags = @import("flags.zig");
+const compile = @import("compiler.zig").compile;
 
 pub const InterpretError = error{
     CompileError,
@@ -28,16 +29,21 @@ pub const VirtualMachine = struct {
         self.stack.deinit();
     }
 
-    pub fn interpret(self: *VirtualMachine, chunk: Chunk) InterpretError!Value {
-        if (chunk.code.items.len == 0) {
-            return InterpretError.RuntimeError;
-        }
-
-        self.chunk = chunk;
-        // Initialize self.ip with the pointers of the slice/array.
-        self.ip = chunk.code.items.ptr;
-        return self.run();
+    pub fn interpret(self: *VirtualMachine, source: []const u8) InterpretError!void {
+        _ = self.ip;
+        return compile(source);
     }
+
+    // pub fn interpret(self: *VirtualMachine, chunk: Chunk) InterpretError!Value {
+    //     if (chunk.code.items.len == 0) {
+    //         return InterpretError.RuntimeError;
+    //     }
+    //
+    //     self.chunk = chunk;
+    //     // Initialize self.ip with the pointers of the slice/array.
+    //     self.ip = chunk.code.items.ptr;
+    //     return self.run();
+    // }
 
     fn run(self: *VirtualMachine) InterpretError!Value {
         // Note that self.read_byte() advances the pointer
@@ -151,28 +157,28 @@ test "vm_init" {
     try std.testing.expect(vm.stack.items.len == 0);
 }
 
-test "vm_run_empty_chunk" {
-    const allocator = std.testing.allocator;
-    var vm = VirtualMachine.init(allocator);
-    var chunk = Chunk.init(allocator);
-    defer vm.deinit();
-    defer chunk.deinit();
+// test "vm_run_empty_chunk" {
+//     const allocator = std.testing.allocator;
+//     var vm = VirtualMachine.init(allocator);
+//     var chunk = Chunk.init(allocator);
+//     defer vm.deinit();
+//     defer chunk.deinit();
+//
+//     try std.testing.expectError(InterpretError.RuntimeError, vm.interpret(chunk));
+// }
 
-    try std.testing.expectError(InterpretError.RuntimeError, vm.interpret(chunk));
-}
-
-test "vm_run" {
-    const allocator = std.testing.allocator;
-    var vm = VirtualMachine.init(allocator);
-    var chunk = Chunk.init(allocator);
-    defer vm.deinit();
-    defer chunk.deinit();
-
-    try test_init_chunk(&chunk);
-
-    const result: Value = try vm.interpret(chunk);
-    try std.testing.expect(result == -0.8214285714285714);
-}
+// test "vm_run" {
+//     const allocator = std.testing.allocator;
+//     var vm = VirtualMachine.init(allocator);
+//     var chunk = Chunk.init(allocator);
+//     defer vm.deinit();
+//     defer chunk.deinit();
+//
+//     try test_init_chunk(&chunk);
+//
+//     const result: Value = try vm.interpret(chunk);
+//     try std.testing.expect(result == -0.8214285714285714);
+// }
 
 test "vm_read_byte" {
     const allocator = std.testing.allocator;

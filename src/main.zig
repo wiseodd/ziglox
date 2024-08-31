@@ -1,6 +1,4 @@
 const std = @import("std");
-const Chunk = @import("chunk.zig").Chunk;
-const OpCode = @import("chunk.zig").OpCode;
 const debug = @import("debug.zig");
 const VirtualMachine = @import("vm.zig").VirtualMachine;
 const InterpretError = @import("vm.zig").InterpretError;
@@ -38,9 +36,7 @@ fn repl(vm: *VirtualMachine, allocator: std.mem.Allocator) !void {
         // Akin to Rust's if-let
         if (maybe_input) |input| {
             defer allocator.free(input);
-            const chunk = Chunk.init(allocator);
-            defer chunk.deinit();
-            _ = vm.interpret(chunk) catch {
+            _ = vm.interpret(input) catch {
                 std.debug.print("Not implemented yet!\n", .{});
             };
         } else {
@@ -54,9 +50,7 @@ fn run_file(path: []const u8, vm: *VirtualMachine, allocator: std.mem.Allocator)
     const source: []u8 = read_file(path, allocator);
     defer allocator.free(source);
 
-    const chunk = Chunk.init(allocator);
-    defer chunk.deinit();
-    _ = vm.interpret(chunk) catch |err| switch (err) {
+    _ = vm.interpret(source) catch |err| switch (err) {
         InterpretError.CompileError => {
             std.debug.print("Not implemented yet!\n", .{});
             std.process.exit(65);
