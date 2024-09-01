@@ -5,6 +5,7 @@ const Token = @import("token.zig").Token;
 const TokenType = @import("token.zig").TokenType;
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
+const Value = @import("value.zig").Value;
 
 pub const Parser = struct {
     source: []const u8,
@@ -63,6 +64,15 @@ pub const Parser = struct {
         self.emit_return();
     }
 
+    fn number(self: *Parser) void {
+        const lexeme: []const u8 = self.previous.start[0..self.previous.length];
+        const val: f64 = std.fmt.parseFloat(f64, lexeme) catch {
+            self.err("Invalid number string.");
+            return;
+        };
+        self.emit_constant(val);
+    }
+
     fn emit_byte(self: *Parser, byte: u8) void {
         self.write_chunk(self.current_chunk(), byte, self.previous.line);
     }
@@ -74,6 +84,19 @@ pub const Parser = struct {
 
     fn emit_return(self: *Parser) void {
         self.emit_byte(@intFromEnum(OpCode.Return));
+    }
+
+    fn emit_constant(self: *Parser, value: Value) void {
+        self.emit_bytes(OpCode.Constant, self.make_constant(value));
+    }
+
+    fn make_constant(self: *Parser, value: Value) u8 {
+        const idx: usize = self.chunk.add_constant(value) catch {
+            self.err("Too many constants in one chunk.");
+            return 0;
+        };
+
+        return @intCast(idx);
     }
 
     fn current_chunk(self: *Parser) *Chunk {
