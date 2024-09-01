@@ -7,4 +7,4 @@ i.e. the second part of the book.
 
 > [!NOTE]
 > Check out <https://github.com/wiseodd/rustlox> for my implementation
-> of Lox interpreter (vis-a-vis compiler), written in Rust.
+> of Lox _interpreter_ (as opposed to the compiler here), written in Rust.
