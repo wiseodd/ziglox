@@ -157,12 +157,9 @@ test "vm_init" {
 test "vm_run_empty_chunk" {
     const allocator = std.testing.allocator;
     var vm = VirtualMachine.init(allocator);
-    var chunk = Chunk.init(allocator);
     defer vm.deinit();
-    defer chunk.deinit();
 
-    vm.chunk = chunk;
-    vm.ip = chunk.code.items.ptr;
+    vm.ip = vm.chunk.code.items.ptr;
 
     try vm.run();
 }
@@ -170,14 +167,11 @@ test "vm_run_empty_chunk" {
 test "vm_run" {
     const allocator = std.testing.allocator;
     var vm = VirtualMachine.init(allocator);
-    var chunk = Chunk.init(allocator);
     defer vm.deinit();
-    defer chunk.deinit();
 
-    try test_init_chunk(&chunk);
+    try test_init_chunk(&vm.chunk);
 
-    vm.chunk = chunk;
-    vm.ip = chunk.code.items.ptr;
+    vm.ip = vm.chunk.code.items.ptr;
 
     try vm.run();
 
@@ -192,14 +186,11 @@ test "vm_run" {
 test "vm_read_byte" {
     const allocator = std.testing.allocator;
     var vm = VirtualMachine.init(allocator);
-    var chunk = Chunk.init(allocator);
     defer vm.deinit();
-    defer chunk.deinit();
 
-    try test_init_chunk(&chunk);
+    try test_init_chunk(&vm.chunk);
 
-    vm.chunk = chunk;
-    vm.ip = chunk.code.items.ptr;
+    vm.ip = vm.chunk.code.items.ptr;
 
     const expectations = [_]OpCode{ OpCode.Constant, OpCode.Constant, OpCode.Add };
 
@@ -213,14 +204,11 @@ test "vm_read_byte" {
 test "vm_read_const" {
     const allocator = std.testing.allocator;
     var vm = VirtualMachine.init(allocator);
-    var chunk = Chunk.init(allocator);
     defer vm.deinit();
-    defer chunk.deinit();
 
-    try test_init_chunk(&chunk);
+    try test_init_chunk(&vm.chunk);
 
-    vm.chunk = chunk;
-    vm.ip = chunk.code.items.ptr;
+    vm.ip = vm.chunk.code.items.ptr;
 
     const expectations = [_]Value{ 1.2, 3.4 };
 
