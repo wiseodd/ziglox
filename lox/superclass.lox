@@ -1,0 +1,37 @@
+class Doughnut {
+  init() {
+    this.name = "Generic Doughnut";
+  }
+
+  cook() {
+    print "Fry until golden brown.";
+  }
+}
+
+class BostonCream < Doughnut {}
+
+var boston_cream = BostonCream();
+print boston_cream.name;
+
+print "-------------------------------------";
+
+class StrawberryCheesecake < Doughnut {
+  init() {
+    this.name = "Strawberry Cheesecake";
+  }
+}
+
+var sc = StrawberryCheesecake();
+print sc.name;
+sc.cook();
+
+print "-------------------------------------";
+
+class Plain < Doughnut {
+  cook() {
+    super.cook();
+    print "Done lol!";
+  }
+}
+
+Plain().cook();
