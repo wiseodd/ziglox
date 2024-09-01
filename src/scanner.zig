@@ -241,7 +241,7 @@ pub const Scanner = struct {
     }
 };
 
-test "init" {
+test "scanner_init" {
     const source = "1 + 1 = 2;\nfor (var i = 0; i < 10; i++) { print i; }";
     const scanner = Scanner.init(source);
 
@@ -317,16 +317,30 @@ test "scan_numbers" {
 }
 
 test "scan_strings" {
-    // Valid string
+    // String
     var scanner = Scanner.init("\"this is a string\" - qwerty");
     var result: Token = scanner.scan();
-    const expected: Token = Token.init(&scanner, TokenType.String);
+    var expected: Token = Token.init(&scanner, TokenType.String);
 
     try expectEqual(expected, result);
     try expectEqual(18, result.length);
 
+    // Multiline string
+    scanner = Scanner.init("\"this is a multiline string\n\tasdsadsad\nasda\"");
+    result = scanner.scan();
+    expected = Token.init(&scanner, TokenType.String);
+
+    try expectEqual(expected, result);
+    try expectEqual(3, result.line);
+
     // Invalid string
     scanner = Scanner.init("\"this is a string - qwerty");
+    result = scanner.scan();
+
+    try expectEqual(TokenType.Error, result.token_type);
+
+    // Invalid multiline string
+    scanner = Scanner.init("\"this is a multiline string\n\tasdsadsad\nasda'");
     result = scanner.scan();
 
     try expectEqual(TokenType.Error, result.token_type);
