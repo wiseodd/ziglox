@@ -5,7 +5,7 @@ const Value = @import("value.zig").Value;
 const print_value = @import("value.zig").print_value;
 const debug = @import("debug.zig");
 const flags = @import("flags.zig");
-const compile = @import("compiler.zig").compile;
+const Parser = @import("compiler.zig").Parser;
 
 pub const InterpretError = error{
     CompileError,
@@ -19,22 +19,30 @@ pub const VirtualMachine = struct {
 
     pub fn init(allocator: std.mem.Allocator) VirtualMachine {
         return VirtualMachine{
-            .chunk = undefined,
+            .chunk = Chunk.init(allocator),
             .ip = undefined,
             .stack = std.ArrayList(Value).init(allocator),
         };
     }
 
     pub fn deinit(self: *VirtualMachine) void {
+        self.chunk.deinit();
         self.stack.deinit();
     }
 
     pub fn interpret(self: *VirtualMachine, source: []const u8) InterpretError!void {
-        _ = self.ip;
-        return compile(source);
+        var parser = Parser.init(source, &self.chunk);
+        try parser.compile();
+
+        // Initialize the instruction pointer to the start of the chunk's bytecode
+        self.ip = self.chunk.code.items.ptr;
+
+        try self.run();
     }
 
-    fn run(self: *VirtualMachine) InterpretError!Value {
+    fn run(self: *VirtualMachine) InterpretError!void {
+        if (self.chunk.code.items.len == 0) return;
+
         // Note that self.read_byte() advances the pointer
         while (true) {
             if (flags.DEBUG_TRACE_EXECUTION) {
@@ -56,22 +64,22 @@ pub const VirtualMachine = struct {
             const instruction: OpCode = @enumFromInt(self.read_byte());
 
             switch (instruction) {
-                OpCode.OpConstant => {
+                OpCode.Constant => {
                     const constant: Value = self.read_constant();
                     self.stack.append(constant) catch {
                         return InterpretError.RuntimeError;
                     };
                 },
-                OpCode.OpAdd => try self.binary_op(OpCode.OpAdd),
-                OpCode.OpSubstract => try self.binary_op(OpCode.OpSubstract),
-                OpCode.OpMultiply => try self.binary_op(OpCode.OpMultiply),
-                OpCode.OpDivide => try self.binary_op(OpCode.OpDivide),
-                OpCode.OpNegate => {
+                OpCode.Add => try self.binary_op(OpCode.Add),
+                OpCode.Substract => try self.binary_op(OpCode.Substract),
+                OpCode.Multiply => try self.binary_op(OpCode.Multiply),
+                OpCode.Divide => try self.binary_op(OpCode.Divide),
+                OpCode.Negate => {
                     self.stack.append(-self.stack.pop()) catch {
                         return InterpretError.RuntimeError;
                     };
                 },
-                OpCode.OpReturn => {
+                OpCode.Return => {
                     const retval: Value = self.stack.pop();
 
                     if (flags.DEBUG_TRACE_EXECUTION) {
@@ -79,7 +87,7 @@ pub const VirtualMachine = struct {
                         std.debug.print("\n", .{});
                     }
 
-                    return retval;
+                    return;
                 },
             }
         }
@@ -105,10 +113,10 @@ pub const VirtualMachine = struct {
         const val2: Value = self.stack.pop();
         const val1: Value = self.stack.pop();
         const res: Value = switch (op) {
-            OpCode.OpAdd => val1 + val2,
-            OpCode.OpSubstract => val1 - val2,
-            OpCode.OpMultiply => val1 * val2,
-            OpCode.OpDivide => val1 / val2,
+            OpCode.Add => val1 + val2,
+            OpCode.Substract => val1 - val2,
+            OpCode.Multiply => val1 * val2,
+            OpCode.Divide => val1 / val2,
             else => return InterpretError.RuntimeError,
         };
         self.stack.append(res) catch {
@@ -119,23 +127,23 @@ pub const VirtualMachine = struct {
 
 fn test_init_chunk(chunk: *Chunk) !void {
     var index: usize = try chunk.add_constant(1.2);
-    try chunk.write_code(@intFromEnum(OpCode.OpConstant), 123);
+    try chunk.write_code(@intFromEnum(OpCode.Constant), 123);
     try chunk.write_code(@intCast(index), 123);
 
     index = try chunk.add_constant(3.4);
-    try chunk.write_code(@intFromEnum(OpCode.OpConstant), 123);
+    try chunk.write_code(@intFromEnum(OpCode.Constant), 123);
     try chunk.write_code(@intCast(index), 123);
 
-    try chunk.write_code(@intFromEnum(OpCode.OpAdd), 123);
+    try chunk.write_code(@intFromEnum(OpCode.Add), 123);
 
     index = try chunk.add_constant(5.6);
-    try chunk.write_code(@intFromEnum(OpCode.OpConstant), 123);
+    try chunk.write_code(@intFromEnum(OpCode.Constant), 123);
     try chunk.write_code(@intCast(index), 123);
 
-    try chunk.write_code(@intFromEnum(OpCode.OpDivide), 123);
-    try chunk.write_code(@intFromEnum(OpCode.OpNegate), 123);
+    try chunk.write_code(@intFromEnum(OpCode.Divide), 123);
+    try chunk.write_code(@intFromEnum(OpCode.Negate), 123);
 
-    try chunk.write_code(@intFromEnum(OpCode.OpReturn), 123);
+    try chunk.write_code(@intFromEnum(OpCode.Return), 123);
 }
 
 test "vm_init" {
@@ -144,6 +152,41 @@ test "vm_init" {
     defer vm.deinit();
 
     try std.testing.expect(vm.stack.items.len == 0);
+}
+
+test "vm_run_empty_chunk" {
+    const allocator = std.testing.allocator;
+    var vm = VirtualMachine.init(allocator);
+    var chunk = Chunk.init(allocator);
+    defer vm.deinit();
+    defer chunk.deinit();
+
+    vm.chunk = chunk;
+    vm.ip = chunk.code.items.ptr;
+
+    try vm.run();
+}
+
+test "vm_run" {
+    const allocator = std.testing.allocator;
+    var vm = VirtualMachine.init(allocator);
+    var chunk = Chunk.init(allocator);
+    defer vm.deinit();
+    defer chunk.deinit();
+
+    try test_init_chunk(&chunk);
+
+    vm.chunk = chunk;
+    vm.ip = chunk.code.items.ptr;
+
+    try vm.run();
+
+    try std.testing.expectEqual(
+        vm.chunk.code.items.len,
+        @intFromPtr(vm.ip) - @intFromPtr(vm.chunk.code.items.ptr),
+    );
+
+    try std.testing.expectEqual(0, vm.stack.items.len);
 }
 
 test "vm_read_byte" {
@@ -158,7 +201,7 @@ test "vm_read_byte" {
     vm.chunk = chunk;
     vm.ip = chunk.code.items.ptr;
 
-    const expectations = [_]OpCode{ OpCode.OpConstant, OpCode.OpConstant, OpCode.OpAdd };
+    const expectations = [_]OpCode{ OpCode.Constant, OpCode.Constant, OpCode.Add };
 
     for (expectations) |exp| {
         const instruction: OpCode = @enumFromInt(vm.read_byte());
@@ -197,21 +240,21 @@ test "vm_binary_op" {
     try vm.stack.append(3);
     try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 6, 3 }));
 
-    try vm.binary_op(OpCode.OpAdd);
+    try vm.binary_op(OpCode.Add);
     try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[1]Value{9}));
 
     try vm.stack.append(4);
     try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 9, 4 }));
-    try vm.binary_op(OpCode.OpSubstract);
+    try vm.binary_op(OpCode.Substract);
     try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[1]Value{5}));
 
     try vm.stack.append(3.2);
     try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 5, 3.2 }));
-    try vm.binary_op(OpCode.OpMultiply);
+    try vm.binary_op(OpCode.Multiply);
     try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[1]Value{16}));
 
     try vm.stack.append(8.0);
     try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 16, 8 }));
-    try vm.binary_op(OpCode.OpDivide);
+    try vm.binary_op(OpCode.Divide);
     try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[1]Value{2}));
 }

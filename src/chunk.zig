@@ -4,13 +4,13 @@ const expect = std.testing.expect;
 const val = @import("value.zig");
 
 pub const OpCode = enum(u8) {
-    OpConstant,
-    OpAdd,
-    OpSubstract,
-    OpMultiply,
-    OpDivide,
-    OpNegate,
-    OpReturn,
+    Constant,
+    Add,
+    Substract,
+    Multiply,
+    Divide,
+    Negate,
+    Return,
 };
 
 pub const Chunk = struct {
@@ -50,12 +50,12 @@ test "chunk" {
     defer chunk.deinit();
 
     const index: usize = try chunk.add_constant(1.2);
-    try chunk.write_code(@intFromEnum(OpCode.OpConstant), 123);
+    try chunk.write_code(@intFromEnum(OpCode.Constant), 123);
     try chunk.write_code(@intCast(index), 123);
-    try chunk.write_code(@intFromEnum(OpCode.OpReturn), 123);
+    try chunk.write_code(@intFromEnum(OpCode.Return), 123);
 
     try expect(chunk.code.items.len == 3);
-    try expect(std.mem.eql(u8, chunk.code.items, &([_]u8{ @intFromEnum(OpCode.OpConstant), 0, @intFromEnum(OpCode.OpReturn) })));
+    try expect(std.mem.eql(u8, chunk.code.items, &([_]u8{ @intFromEnum(OpCode.Constant), 0, @intFromEnum(OpCode.Return) })));
 
     try expect(chunk.constants.items.len == 1);
     try expect(chunk.constants.items[0] == 1.2);
