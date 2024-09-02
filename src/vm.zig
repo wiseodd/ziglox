@@ -58,7 +58,7 @@ pub const VirtualMachine = struct {
                 // Since arrays are contiguous, we can compute the distance from the
                 // first element.
                 const offset: usize = @intFromPtr(self.ip) - @intFromPtr(self.chunk.code.items.ptr);
-                _ = debug.disassemble_instruction(self.chunk, offset);
+                debug.disassemble_instruction(&self.chunk, offset);
             }
 
             const instruction: OpCode = @enumFromInt(self.read_byte());

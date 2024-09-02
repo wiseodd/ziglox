@@ -6,8 +6,40 @@ const TokenType = @import("token.zig").TokenType;
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
 const Value = @import("value.zig").Value;
+const FLAGS = @import("flags.zig");
+const debug = @import("debug.zig");
+
+// Lowest to highest --- the ordering here implies
+// the ordering in the members' ordinal values `@intFromEnum(Precedence.Member)`.
+// Hence we can compare precedence like so `@intFromEnum(.Term) > @intFromEnum(.Or)`.
+const Precedence = enum {
+    None,
+    Assignment, // =
+    Or, // or
+    And, // and
+    Equality, // ==
+    Comparison, // < > <= >=
+    Term, // + -
+    Factor, // * /
+    Unary, // ! -
+    Call, // . ()
+    Primary,
+};
 
 pub const Parser = struct {
+    // Type alias for parser functions (`unary`, `binary`, etc.)
+    const ParseFn = fn (*Parser) void;
+
+    // Rule for parsing
+    const ParseRule = struct {
+        prefix: ?*const ParseFn = null,
+        infix: ?*const ParseFn = null,
+        precedence: Precedence = .None,
+    };
+
+    // Type alias
+    const ParseRules = std.EnumArray(TokenType, ParseRule);
+
     source: []const u8,
     scanner: Scanner,
     compiling_chunk: *Chunk,
@@ -15,6 +47,50 @@ pub const Parser = struct {
     previous: Token = undefined,
     had_error: bool = false,
     panic_mode: bool = false,
+    // We build a static parse rules table here and access it through pointers.
+    // It's more efficient than having a function that return a new `ParseRule` each time.
+    parse_rules: ParseRules = ParseRules.init(.{
+        .LeftParen = ParseRule{ .prefix = grouping, .infix = null, .precedence = Precedence.None },
+        .RightParen = ParseRule{},
+        .LeftBrace = ParseRule{},
+        .RightBrace = ParseRule{},
+        .Comma = ParseRule{},
+        .Dot = ParseRule{},
+        .Minus = ParseRule{ .prefix = unary, .infix = binary, .precedence = Precedence.Term },
+        .Plus = ParseRule{ .prefix = null, .infix = binary, .precedence = Precedence.Term },
+        .SemiColon = ParseRule{},
+        .Slash = ParseRule{ .prefix = null, .infix = binary, .precedence = Precedence.Term },
+        .Star = ParseRule{ .prefix = null, .infix = binary, .precedence = Precedence.Term },
+        .Bang = ParseRule{},
+        .BangEqual = ParseRule{},
+        .Equal = ParseRule{},
+        .EqualEqual = ParseRule{},
+        .Greater = ParseRule{},
+        .GreaterEqual = ParseRule{},
+        .Less = ParseRule{},
+        .LessEqual = ParseRule{},
+        .Identifier = ParseRule{},
+        .String = ParseRule{},
+        .Number = ParseRule{ .prefix = number, .infix = null, .precedence = Precedence.None },
+        .And = ParseRule{},
+        .Class = ParseRule{},
+        .Else = ParseRule{},
+        .False = ParseRule{},
+        .For = ParseRule{},
+        .Fun = ParseRule{},
+        .If = ParseRule{},
+        .Nil = ParseRule{},
+        .Or = ParseRule{},
+        .Print = ParseRule{},
+        .Return = ParseRule{},
+        .Super = ParseRule{},
+        .This = ParseRule{},
+        .True = ParseRule{},
+        .Var = ParseRule{},
+        .While = ParseRule{},
+        .Error = ParseRule{},
+        .EOF = ParseRule{},
+    }),
 
     pub fn init(source: []const u8, chunk: *Chunk) Parser {
         return Parser{
@@ -55,13 +131,27 @@ pub const Parser = struct {
         }
     }
 
-    fn expression(self: *Parser) void {
-        _ = self;
-        return; // TODO
-    }
-
     fn end_compiler(self: *Parser) void {
         self.emit_return();
+
+        if (FLAGS.DEBUG_PRINT_CODE) {
+            if (!self.had_error) {
+                debug.disasemble_chunk(self.current_chunk(), "code");
+            }
+        }
+    }
+
+    fn expression(self: *Parser) void {
+        // Compile all expressions that have higher or equal level of precedence
+        // than assignment `=` (the lowest precedence level).
+        self.parse_precedence(Precedence.Assignment);
+    }
+
+    fn grouping(self: *Parser) void {
+        // The left paren has been consumed, so we can directly
+        // evaluate the expression inside the grouping recursively
+        self.expression();
+        self.consume(TokenType.RightParen, "Expect ')' after expression.");
     }
 
     fn number(self: *Parser) void {
@@ -73,8 +163,73 @@ pub const Parser = struct {
         self.emit_constant(val);
     }
 
+    fn unary(self: *Parser) void {
+        // The unary operator type
+        const operator_type = self.previous.token_type;
+
+        // Compile the operand recursively
+        self.parse_precedence(Precedence.Unary);
+
+        // Emit the operator instruction.
+        // This is done after emitting the expression even though the source
+        // code is written operator-first e.g. `-(2 + 3)` because our VM is a stack.
+        // I.e. we want to pop `5` first, then negeate it, then push the result.
+        switch (operator_type) {
+            TokenType.Minus => self.emit_byte(@intFromEnum(OpCode.Negate)),
+            else => return, // Unreacable
+        }
+    }
+
+    fn binary(self: *Parser) void {
+        const operator_type: TokenType = self.previous.token_type;
+        const parse_rule: *const ParseRule = self.parse_rules.getPtrConst(operator_type);
+
+        // Parse with the next level of precedence or higher
+        self.parse_precedence(@enumFromInt(@intFromEnum(parse_rule.precedence) + 1));
+
+        switch (operator_type) {
+            TokenType.Plus => self.emit_byte(@intFromEnum(OpCode.Add)),
+            TokenType.Minus => self.emit_byte(@intFromEnum(OpCode.Substract)),
+            TokenType.Star => self.emit_byte(@intFromEnum(OpCode.Multiply)),
+            TokenType.Slash => self.emit_byte(@intFromEnum(OpCode.Divide)),
+            else => return,
+        }
+    }
+
+    /// Compile expressions that have higher or equal precedence than `precedence`.
+    /// If we have: `-a.b + c` then `self.parse_precedence(Precedence.Assignment)`
+    /// will parse the entire expression because `+` and `-` has higher precedence than
+    /// `=`. If instead we call `self.parse_precedence(Precedence.Unary)`, this will
+    /// compile `-a.b` since `+` has lower precedence than unary `-`.
+    fn parse_precedence(self: *Parser, precedence: Precedence) void {
+        self.advance();
+        const parse_rule: *const ParseRule = self.parse_rules.getPtrConst(self.previous.token_type);
+        const prefix_rule: *const ParseFn = parse_rule.prefix orelse {
+            // `prefix == null` => `self.previous` is not a token that expect
+            // an expression next. This is a syntax error.
+            self.err("Expect expression.");
+            return;
+        };
+
+        // Compile the prefix of the expression
+        prefix_rule(self);
+
+        // Compile the inf
+        while (@intFromEnum(precedence) <= @intFromEnum(self.parse_rules.getPtrConst(self.current.token_type).precedence)) {
+            self.advance();
+            const infix_rule = self.parse_rules.getPtrConst(self.previous.token_type).infix orelse {
+                self.err("Expect expression.");
+                return;
+            };
+            infix_rule(self);
+        }
+    }
+
     fn emit_byte(self: *Parser, byte: u8) void {
-        self.write_chunk(self.current_chunk(), byte, self.previous.line);
+        self.current_chunk().write_code(byte, self.previous.line) catch {
+            self.err("Unable to write chunk.");
+            return;
+        };
     }
 
     fn emit_bytes(self: *Parser, byte1: u8, byte2: u8) void {
@@ -87,11 +242,11 @@ pub const Parser = struct {
     }
 
     fn emit_constant(self: *Parser, value: Value) void {
-        self.emit_bytes(OpCode.Constant, self.make_constant(value));
+        self.emit_bytes(@intFromEnum(OpCode.Constant), self.make_constant(value));
     }
 
     fn make_constant(self: *Parser, value: Value) u8 {
-        const idx: usize = self.chunk.add_constant(value) catch {
+        const idx: usize = self.current_chunk().add_constant(value) catch {
             self.err("Too many constants in one chunk.");
             return 0;
         };
@@ -101,15 +256,6 @@ pub const Parser = struct {
 
     fn current_chunk(self: *Parser) *Chunk {
         return self.compiling_chunk;
-    }
-
-    fn write_chunk(self: *Parser, chunk: *Chunk, byte: u8, line: usize) void {
-        // TODO
-        _ = chunk;
-        _ = self;
-        _ = byte;
-        _ = line;
-        return;
     }
 
     fn err_at_current(self: *Parser, message: []const u8) void {
