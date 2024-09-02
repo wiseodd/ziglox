@@ -1,4 +1,5 @@
 const std = @import("std");
+const testing = std.testing;
 const InterpretError = @import("vm.zig").InterpretError;
 const Scanner = @import("scanner.zig").Scanner;
 const Token = @import("token.zig").Token;
@@ -270,15 +271,68 @@ pub const Parser = struct {
         if (self.panic_mode) return;
 
         self.panic_mode = true;
-        std.log.err("[line {}] Error", .{token.line});
+        std.debug.print("[Line {}] Error", .{token.line});
 
         switch (token.token_type) {
-            TokenType.EOF => std.log.err(" at end", .{}),
+            TokenType.EOF => std.debug.print(" at end", .{}),
             TokenType.Error => {}, // do nothing
-            else => std.log.err(" at '{s}'", .{token.start[0..token.length]}),
+            else => std.debug.print(" at '{s}'", .{token.start[0..token.length]}),
         }
 
-        std.log.err(": {s}\n", .{message});
+        std.debug.print(": {s}\n", .{message});
         self.had_error = true;
     }
 };
+
+test "compile_unary" {
+    for ([_][]const u8{ "-32", "-223.32", "-0", "-0.00" }) |source| {
+        const allocator = std.testing.allocator;
+        var chunk = Chunk.init(allocator);
+        defer chunk.deinit();
+
+        var parser = Parser.init(source, &chunk);
+        try parser.compile();
+
+        // OpCode.Constant (2 bytes), OpCode.Negate (1 byte), OpCode.Return (1 byte)
+        try testing.expectEqual(4, parser.compiling_chunk.code.items.len);
+        try testing.expectEqual(1, parser.compiling_chunk.constants.items.len);
+
+        const expected: Value = try std.fmt.parseFloat(Value, source);
+        try testing.expectEqual(-expected, parser.compiling_chunk.constants.items[0]);
+    }
+}
+
+test "compile_binary" {
+    for ([_][]const u8{ "32 + 2.322", "1 - 2", "0.0 * 23", "22 / 10" }) |source| {
+        const allocator = std.testing.allocator;
+        var chunk = Chunk.init(allocator);
+        defer chunk.deinit();
+
+        var parser = Parser.init(source, &chunk);
+        try parser.compile();
+
+        // OpCode.Constant (4 bytes), OpCode.{Operator} (1 byte), OpCode.Return (1 byte)
+        try testing.expectEqual(6, parser.compiling_chunk.code.items.len);
+        try testing.expectEqual(2, parser.compiling_chunk.constants.items.len);
+    }
+}
+
+test "compile_empty" {
+    const allocator = std.testing.allocator;
+    var chunk = Chunk.init(allocator);
+    defer chunk.deinit();
+
+    var parser = Parser.init("", &chunk);
+    try testing.expectError(InterpretError.CompileError, parser.compile());
+}
+
+test "compile_syntax_error" {
+    for ([_][]const u8{ "-return", "for + while", "1 * if", "else / 5", "\"aloha" }) |source| {
+        const allocator = std.testing.allocator;
+        var chunk = Chunk.init(allocator);
+        defer chunk.deinit();
+
+        var parser = Parser.init(source, &chunk);
+        try testing.expectError(InterpretError.CompileError, parser.compile());
+    }
+}
