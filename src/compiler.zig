@@ -161,7 +161,7 @@ pub const Parser = struct {
             self.err("Invalid number string.");
             return;
         };
-        self.emit_constant(val);
+        self.emit_constant(Value{ .Number = val });
     }
 
     fn unary(self: *Parser) void {
@@ -297,8 +297,8 @@ test "compile_unary" {
         try testing.expectEqual(4, parser.compiling_chunk.code.items.len);
         try testing.expectEqual(1, parser.compiling_chunk.constants.items.len);
 
-        const expected: Value = try std.fmt.parseFloat(Value, source);
-        try testing.expectEqual(-expected, parser.compiling_chunk.constants.items[0]);
+        const expected = try std.fmt.parseFloat(f64, source);
+        try testing.expectEqual(-expected, parser.compiling_chunk.constants.items[0].Number);
     }
 }
 

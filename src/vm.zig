@@ -1,4 +1,5 @@
 const std = @import("std");
+const testing = std.testing;
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
 const Value = @import("value.zig").Value;
@@ -16,12 +17,14 @@ pub const VirtualMachine = struct {
     chunk: Chunk,
     ip: [*]u8,
     stack: std.ArrayList(Value),
+    allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) VirtualMachine {
         return VirtualMachine{
             .chunk = Chunk.init(allocator),
             .ip = undefined,
             .stack = std.ArrayList(Value).init(allocator),
+            .allocator = allocator,
         };
     }
 
@@ -75,9 +78,18 @@ pub const VirtualMachine = struct {
                 OpCode.Multiply => try self.binary_op(OpCode.Multiply),
                 OpCode.Divide => try self.binary_op(OpCode.Divide),
                 OpCode.Negate => {
-                    self.stack.append(-self.stack.pop()) catch {
-                        return InterpretError.RuntimeError;
-                    };
+                    switch (self.peek(0)) {
+                        .Number => {
+                            const negated = Value{ .Number = -self.stack.pop().Number };
+                            self.stack.append(negated) catch {
+                                return InterpretError.RuntimeError;
+                            };
+                        },
+                        else => {
+                            self.runtime_error("Operand must be a number.", .{});
+                            return InterpretError.RuntimeError;
+                        },
+                    }
                 },
                 OpCode.Return => {
                     const retval: Value = self.stack.pop();
@@ -91,6 +103,29 @@ pub const VirtualMachine = struct {
                 },
             }
         }
+    }
+
+    fn peek(self: *VirtualMachine, distance: usize) Value {
+        return self.stack.items[self.stack.items.len - 1 - distance];
+    }
+
+    fn runtime_error(self: *VirtualMachine, comptime format: []const u8, args: anytype) void {
+        std.debug.print(format, args);
+        std.debug.print("\n", .{});
+
+        // Distance between the current ponter to the beginning.
+        // Note that there's `- 1` there because `self.ip` has been advanced by one
+        // when an instruction is read via `self.read_byte()`.
+        const instruction: usize = @intFromPtr(self.ip) - @intFromPtr(self.chunk.code.items.ptr) - 1;
+        const line: usize = self.chunk.lines.items[instruction];
+        std.debug.print("[Line {}] in script\n", .{line});
+
+        self.reset_stack();
+    }
+
+    pub fn reset_stack(self: *VirtualMachine) void {
+        self.stack.deinit();
+        self.stack = std.ArrayList(Value).init(self.allocator);
     }
 
     // Inline function to emulate C macro
@@ -110,33 +145,33 @@ pub const VirtualMachine = struct {
 
     inline fn binary_op(self: *VirtualMachine, op: OpCode) InterpretError!void {
         // The first-popped value is val2 since it's a stack (LIFO)
-        const val2: Value = self.stack.pop();
-        const val1: Value = self.stack.pop();
-        const res: Value = switch (op) {
+        const val2 = self.stack.pop().Number;
+        const val1 = self.stack.pop().Number;
+        const res = switch (op) {
             OpCode.Add => val1 + val2,
             OpCode.Substract => val1 - val2,
             OpCode.Multiply => val1 * val2,
             OpCode.Divide => val1 / val2,
             else => return InterpretError.RuntimeError,
         };
-        self.stack.append(res) catch {
+        self.stack.append(Value{ .Number = res }) catch {
             return InterpretError.RuntimeError;
         };
     }
 };
 
 fn test_init_chunk(chunk: *Chunk) !void {
-    var index: usize = try chunk.add_constant(1.2);
+    var index: usize = try chunk.add_constant(Value{ .Number = 1.2 });
     try chunk.write_code(@intFromEnum(OpCode.Constant), 123);
     try chunk.write_code(@intCast(index), 123);
 
-    index = try chunk.add_constant(3.4);
+    index = try chunk.add_constant(Value{ .Number = 3.4 });
     try chunk.write_code(@intFromEnum(OpCode.Constant), 123);
     try chunk.write_code(@intCast(index), 123);
 
     try chunk.write_code(@intFromEnum(OpCode.Add), 123);
 
-    index = try chunk.add_constant(5.6);
+    index = try chunk.add_constant(Value{ .Number = 5.6 });
     try chunk.write_code(@intFromEnum(OpCode.Constant), 123);
     try chunk.write_code(@intCast(index), 123);
 
@@ -151,7 +186,7 @@ test "vm_init" {
     var vm = VirtualMachine.init(allocator);
     defer vm.deinit();
 
-    try std.testing.expect(vm.stack.items.len == 0);
+    try testing.expect(vm.stack.items.len == 0);
 }
 
 test "vm_run_empty_chunk" {
@@ -175,12 +210,12 @@ test "vm_run" {
 
     try vm.run();
 
-    try std.testing.expectEqual(
+    try testing.expectEqual(
         vm.chunk.code.items.len,
         @intFromPtr(vm.ip) - @intFromPtr(vm.chunk.code.items.ptr),
     );
 
-    try std.testing.expectEqual(0, vm.stack.items.len);
+    try testing.expectEqual(0, vm.stack.items.len);
 }
 
 test "vm_read_byte" {
@@ -196,7 +231,7 @@ test "vm_read_byte" {
 
     for (expectations) |exp| {
         const instruction: OpCode = @enumFromInt(vm.read_byte());
-        try std.testing.expect(instruction == exp);
+        try testing.expect(instruction == exp);
         _ = vm.read_byte();
     }
 }
@@ -210,12 +245,12 @@ test "vm_read_const" {
 
     vm.ip = vm.chunk.code.items.ptr;
 
-    const expectations = [_]Value{ 1.2, 3.4 };
+    const expectations = [_]Value{ Value{ .Number = 1.2 }, Value{ .Number = 3.4 } };
 
     for (expectations) |exp| {
         _ = vm.read_byte();
         const constant: Value = vm.read_constant();
-        try std.testing.expect(constant == exp);
+        try testing.expect(constant.Number == exp.Number);
     }
 }
 
@@ -224,25 +259,49 @@ test "vm_binary_op" {
     var vm = VirtualMachine.init(allocator);
     defer vm.deinit();
 
-    try vm.stack.append(6);
-    try vm.stack.append(3);
-    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 6, 3 }));
+    try vm.stack.append(Value{ .Number = 6 });
+    try vm.stack.append(Value{ .Number = 3 });
+
+    try testing.expectEqual(2, vm.stack.items.len);
+    try testing.expect(std.meta.eql(vm.stack.items[0], Value{ .Number = 6 }));
+    try testing.expect(std.meta.eql(vm.stack.items[1], Value{ .Number = 3 }));
 
     try vm.binary_op(OpCode.Add);
-    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[1]Value{9}));
 
-    try vm.stack.append(4);
-    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 9, 4 }));
+    try testing.expectEqual(1, vm.stack.items.len);
+    try testing.expect(std.meta.eql(vm.stack.items[0], Value{ .Number = 9 }));
+
+    try vm.stack.append(Value{ .Number = 4 });
+
+    try testing.expectEqual(2, vm.stack.items.len);
+    try testing.expect(std.meta.eql(vm.stack.items[0], Value{ .Number = 9 }));
+    try testing.expect(std.meta.eql(vm.stack.items[1], Value{ .Number = 4 }));
+
     try vm.binary_op(OpCode.Substract);
-    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[1]Value{5}));
+    // try testing.expect(std.mem.eql(Value, vm.stack.items, &[1]Value{Value{ .Number = 5 }}));
 
-    try vm.stack.append(3.2);
-    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 5, 3.2 }));
+    try testing.expectEqual(1, vm.stack.items.len);
+    try testing.expect(std.meta.eql(vm.stack.items[0], Value{ .Number = 5 }));
+
+    try vm.stack.append(Value{ .Number = 3.2 });
+
+    try testing.expectEqual(2, vm.stack.items.len);
+    try testing.expect(std.meta.eql(vm.stack.items[0], Value{ .Number = 5 }));
+    try testing.expect(std.meta.eql(vm.stack.items[1], Value{ .Number = 3.2 }));
+
     try vm.binary_op(OpCode.Multiply);
-    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[1]Value{16}));
 
-    try vm.stack.append(8.0);
-    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[2]Value{ 16, 8 }));
+    try testing.expectEqual(1, vm.stack.items.len);
+    try testing.expect(std.meta.eql(vm.stack.items[0], Value{ .Number = 16 }));
+
+    try vm.stack.append(Value{ .Number = 8.0 });
+
+    try testing.expectEqual(2, vm.stack.items.len);
+    try testing.expect(std.meta.eql(vm.stack.items[0], Value{ .Number = 16 }));
+    try testing.expect(std.meta.eql(vm.stack.items[1], Value{ .Number = 8 }));
+
     try vm.binary_op(OpCode.Divide);
-    try std.testing.expect(std.mem.eql(Value, vm.stack.items, &[1]Value{2}));
+
+    try testing.expectEqual(1, vm.stack.items.len);
+    try testing.expect(std.meta.eql(vm.stack.items[0], Value{ .Number = 2 }));
 }

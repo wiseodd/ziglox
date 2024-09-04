@@ -2,6 +2,7 @@ const std = @import("std");
 const expect = std.testing.expect;
 
 const val = @import("value.zig");
+const Value = @import("value.zig").Value;
 
 pub const OpCode = enum(u8) {
     Constant,
@@ -49,7 +50,7 @@ test "chunk" {
     var chunk = Chunk.init(allocator);
     defer chunk.deinit();
 
-    const index: usize = try chunk.add_constant(1.2);
+    const index: usize = try chunk.add_constant(Value{ .Number = 1.2 });
     try chunk.write_code(@intFromEnum(OpCode.Constant), 123);
     try chunk.write_code(@intCast(index), 123);
     try chunk.write_code(@intFromEnum(OpCode.Return), 123);
@@ -58,7 +59,7 @@ test "chunk" {
     try expect(std.mem.eql(u8, chunk.code.items, &([_]u8{ @intFromEnum(OpCode.Constant), 0, @intFromEnum(OpCode.Return) })));
 
     try expect(chunk.constants.items.len == 1);
-    try expect(chunk.constants.items[0] == 1.2);
+    try expect(chunk.constants.items[0].Number == 1.2);
 
     try expect(chunk.lines.items.len == 3);
     try expect(std.mem.eql(usize, chunk.lines.items, &([_]usize{ 123, 123, 123 })));
