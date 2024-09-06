@@ -9,5 +9,9 @@ pub const Value = union(enum) {
 pub const ValueArray = std.ArrayList(Value);
 
 pub fn print_value(value: Value) void {
-    std.debug.print("{d}", .{value.Number});
+    switch (value) {
+        .Bool => |val| std.debug.print("{}", .{val}),
+        .Number => |val| std.debug.print("{}", .{val}),
+        .Nil => std.debug.print("Nil", .{}),
+    }
 }

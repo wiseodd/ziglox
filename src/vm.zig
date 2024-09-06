@@ -113,7 +113,7 @@ pub const VirtualMachine = struct {
         std.debug.print(format, args);
         std.debug.print("\n", .{});
 
-        // Distance between the current ponter to the beginning.
+        // Distance between the current pointer to the beginning.
         // Note that there's `- 1` there because `self.ip` has been advanced by one
         // when an instruction is read via `self.read_byte()`.
         const instruction: usize = @intFromPtr(self.ip) - @intFromPtr(self.chunk.code.items.ptr) - 1;
@@ -144,9 +144,15 @@ pub const VirtualMachine = struct {
     }
 
     inline fn binary_op(self: *VirtualMachine, op: OpCode) InterpretError!void {
+        if (self.peek(0) != Value.Number or self.peek(1) != Value.Number) {
+            self.runtime_error("Operands must be numbers.", .{});
+            return InterpretError.RuntimeError;
+        }
+
         // The first-popped value is val2 since it's a stack (LIFO)
         const val2 = self.stack.pop().Number;
         const val1 = self.stack.pop().Number;
+
         const res = switch (op) {
             OpCode.Add => val1 + val2,
             OpCode.Substract => val1 - val2,
@@ -205,7 +211,6 @@ test "vm_run" {
     defer vm.deinit();
 
     try test_init_chunk(&vm.chunk);
-
     vm.ip = vm.chunk.code.items.ptr;
 
     try vm.run();
@@ -224,7 +229,6 @@ test "vm_read_byte" {
     defer vm.deinit();
 
     try test_init_chunk(&vm.chunk);
-
     vm.ip = vm.chunk.code.items.ptr;
 
     const expectations = [_]OpCode{ OpCode.Constant, OpCode.Constant, OpCode.Add };
@@ -242,7 +246,6 @@ test "vm_read_const" {
     defer vm.deinit();
 
     try test_init_chunk(&vm.chunk);
-
     vm.ip = vm.chunk.code.items.ptr;
 
     const expectations = [_]Value{ Value{ .Number = 1.2 }, Value{ .Number = 3.4 } };
@@ -278,7 +281,6 @@ test "vm_binary_op" {
     try testing.expect(std.meta.eql(vm.stack.items[1], Value{ .Number = 4 }));
 
     try vm.binary_op(OpCode.Substract);
-    // try testing.expect(std.mem.eql(Value, vm.stack.items, &[1]Value{Value{ .Number = 5 }}));
 
     try testing.expectEqual(1, vm.stack.items.len);
     try testing.expect(std.meta.eql(vm.stack.items[0], Value{ .Number = 5 }));
@@ -304,4 +306,50 @@ test "vm_binary_op" {
 
     try testing.expectEqual(1, vm.stack.items.len);
     try testing.expect(std.meta.eql(vm.stack.items[0], Value{ .Number = 2 }));
+}
+
+test "vm_binary_op_nan_left" {
+    const allocator = std.testing.allocator;
+    var vm = VirtualMachine.init(allocator);
+    defer vm.deinit();
+
+    var index: usize = try vm.chunk.add_constant(Value.Nil);
+    try vm.chunk.write_code(@intFromEnum(OpCode.Constant), 123);
+    try vm.chunk.write_code(@intCast(index), 123);
+    index = try vm.chunk.add_constant(Value{ .Number = 44 });
+    try vm.chunk.write_code(@intFromEnum(OpCode.Constant), 123);
+    try vm.chunk.write_code(@intCast(index), 123);
+    try vm.chunk.write_code(@intFromEnum(OpCode.Multiply), 456);
+    try vm.chunk.write_code(@intFromEnum(OpCode.Return), 123);
+
+    vm.ip = vm.chunk.code.items.ptr;
+
+    try testing.expectError(InterpretError.RuntimeError, vm.run());
+
+    const instruction: usize = @intFromPtr(vm.ip) - @intFromPtr(vm.chunk.code.items.ptr) - 1;
+    const line: usize = vm.chunk.lines.items[instruction];
+    try testing.expectEqual(456, line);
+}
+
+test "vm_binary_op_nan_right" {
+    const allocator = std.testing.allocator;
+    var vm = VirtualMachine.init(allocator);
+    defer vm.deinit();
+
+    var index: usize = try vm.chunk.add_constant(Value{ .Number = 1.2 });
+    try vm.chunk.write_code(@intFromEnum(OpCode.Constant), 123);
+    try vm.chunk.write_code(@intCast(index), 123);
+    index = try vm.chunk.add_constant(Value{ .Bool = false });
+    try vm.chunk.write_code(@intFromEnum(OpCode.Constant), 123);
+    try vm.chunk.write_code(@intCast(index), 123);
+    try vm.chunk.write_code(@intFromEnum(OpCode.Multiply), 456);
+    try vm.chunk.write_code(@intFromEnum(OpCode.Return), 123);
+
+    vm.ip = vm.chunk.code.items.ptr;
+
+    try testing.expectError(InterpretError.RuntimeError, vm.run());
+
+    const instruction: usize = @intFromPtr(vm.ip) - @intFromPtr(vm.chunk.code.items.ptr) - 1;
+    const line: usize = vm.chunk.lines.items[instruction];
+    try testing.expectEqual(456, line);
 }
