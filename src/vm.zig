@@ -73,6 +73,13 @@ pub const VirtualMachine = struct {
                 OpCode.Nil => try self.push(Value.nil()),
                 OpCode.True => try self.push(Value.boolean(true)),
                 OpCode.False => try self.push(Value.boolean(false)),
+                OpCode.Equal => {
+                    const b = try self.pop();
+                    const a = try self.pop();
+                    try self.push(Value.boolean(a.equals(b)));
+                },
+                OpCode.Greater => try self.binary_op(OpCode.Greater),
+                OpCode.Less => try self.binary_op(OpCode.Less),
                 OpCode.Add => try self.binary_op(OpCode.Add),
                 OpCode.Substract => try self.binary_op(OpCode.Substract),
                 OpCode.Multiply => try self.binary_op(OpCode.Multiply),
@@ -166,14 +173,16 @@ pub const VirtualMachine = struct {
         const val2 = (try self.pop()).Number;
         const val1 = (try self.pop()).Number;
 
-        const res = switch (op) {
-            OpCode.Add => val1 + val2,
-            OpCode.Substract => val1 - val2,
-            OpCode.Multiply => val1 * val2,
-            OpCode.Divide => val1 / val2,
+        const res: Value = switch (op) {
+            OpCode.Add => Value.number(val1 + val2),
+            OpCode.Substract => Value.number(val1 - val2),
+            OpCode.Multiply => Value.number(val1 * val2),
+            OpCode.Divide => Value.number(val1 / val2),
+            OpCode.Greater => Value.boolean(val1 > val2),
+            OpCode.Less => Value.boolean(val1 < val2),
             else => return InterpretError.RuntimeError,
         };
-        try self.push(Value.number(res));
+        try self.push(res);
     }
 };
 
