@@ -28,6 +28,9 @@ pub fn disassemble_instruction(chunk: *Chunk, offset: usize) usize {
     const instruction: OpCode = @enumFromInt(chunk.code.items[offset]);
     switch (instruction) {
         OpCode.Constant => return constant_instruction("OP_CONSTANT", chunk, offset),
+        OpCode.Nil => return simple_instruction("OP_NIL", offset),
+        OpCode.True => return simple_instruction("OP_TRUE", offset),
+        OpCode.False => return simple_instruction("OP_FALSE", offset),
         OpCode.Add => return simple_instruction("OP_ADD", offset),
         OpCode.Substract => return simple_instruction("OP_SUBTRACT", offset),
         OpCode.Multiply => return simple_instruction("OP_MULTIPLY", offset),

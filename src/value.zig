@@ -11,7 +11,7 @@ pub const ValueArray = std.ArrayList(Value);
 pub fn print_value(value: Value) void {
     switch (value) {
         .Bool => |val| std.debug.print("{}", .{val}),
-        .Number => |val| std.debug.print("{}", .{val}),
-        .Nil => std.debug.print("Nil", .{}),
+        .Number => |val| std.debug.print("{d}", .{val}),
+        .Nil => std.debug.print("nil", .{}),
     }
 }

@@ -69,10 +69,11 @@ pub const VirtualMachine = struct {
             switch (instruction) {
                 OpCode.Constant => {
                     const constant: Value = self.read_constant();
-                    self.stack.append(constant) catch {
-                        return InterpretError.RuntimeError;
-                    };
+                    try self.push(constant);
                 },
+                OpCode.Nil => try self.push(Value.Nil),
+                OpCode.True => try self.push(Value{ .Bool = true }),
+                OpCode.False => try self.push(Value{ .Bool = false }),
                 OpCode.Add => try self.binary_op(OpCode.Add),
                 OpCode.Substract => try self.binary_op(OpCode.Substract),
                 OpCode.Multiply => try self.binary_op(OpCode.Multiply),
@@ -80,10 +81,8 @@ pub const VirtualMachine = struct {
                 OpCode.Negate => {
                     switch (self.peek(0)) {
                         .Number => {
-                            const negated = Value{ .Number = -self.stack.pop().Number };
-                            self.stack.append(negated) catch {
-                                return InterpretError.RuntimeError;
-                            };
+                            const negated = Value{ .Number = -(try self.pop()).Number };
+                            try self.push(negated);
                         },
                         else => {
                             self.runtime_error("Operand must be a number.", .{});
@@ -92,7 +91,7 @@ pub const VirtualMachine = struct {
                     }
                 },
                 OpCode.Return => {
-                    const retval: Value = self.stack.pop();
+                    const retval: Value = try self.pop();
 
                     if (flags.DEBUG_TRACE_EXECUTION) {
                         print_value(retval);
@@ -103,6 +102,20 @@ pub const VirtualMachine = struct {
                 },
             }
         }
+    }
+
+    fn push(self: *VirtualMachine, value: Value) InterpretError!void {
+        self.stack.append(value) catch {
+            return InterpretError.RuntimeError;
+        };
+    }
+
+    fn pop(self: *VirtualMachine) InterpretError!Value {
+        if (self.stack.items.len == 0) {
+            return InterpretError.RuntimeError;
+        }
+
+        return self.stack.pop();
     }
 
     fn peek(self: *VirtualMachine, distance: usize) Value {
@@ -150,8 +163,8 @@ pub const VirtualMachine = struct {
         }
 
         // The first-popped value is val2 since it's a stack (LIFO)
-        const val2 = self.stack.pop().Number;
-        const val1 = self.stack.pop().Number;
+        const val2 = (try self.pop()).Number;
+        const val1 = (try self.pop()).Number;
 
         const res = switch (op) {
             OpCode.Add => val1 + val2,
@@ -160,9 +173,7 @@ pub const VirtualMachine = struct {
             OpCode.Divide => val1 / val2,
             else => return InterpretError.RuntimeError,
         };
-        self.stack.append(Value{ .Number = res }) catch {
-            return InterpretError.RuntimeError;
-        };
+        try self.push(Value{ .Number = res });
     }
 };
 
