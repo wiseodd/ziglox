@@ -34,6 +34,8 @@ pub const VirtualMachine = struct {
 
     pub fn interpret(self: *VirtualMachine, source: []const u8) InterpretError!void {
         var parser = Parser.init(source, &self.chunk);
+        defer parser.deinit();
+
         try parser.compile();
 
         // Initialize the instruction pointer to the start of the chunk's bytecode

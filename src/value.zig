@@ -1,21 +1,26 @@
 const std = @import("std");
 const testing = std.testing;
+const Obj = @import("object.zig").Obj;
+const ObjType = @import("object.zig").ObjType;
+const String = @import("object.zig").String;
 
-pub const ValueKind = enum {
-    Bool,
-    Number,
-    Nil,
+const ValueError = error{
+    CastError,
 };
 
-pub const Value = union(ValueKind) {
+pub const Value = union(enum) {
     Bool: bool,
     Number: f64,
+    String: String,
     Nil: void,
 
     pub fn print(self: Value) void {
         switch (self) {
             .Bool => |val| std.debug.print("{}", .{val}),
             .Number => |val| std.debug.print("{d}", .{val}),
+            .String => |val| {
+                std.debug.print("{s}", .{val.chars});
+            },
             .Nil => std.debug.print("nil", .{}),
         }
     }
@@ -23,16 +28,18 @@ pub const Value = union(ValueKind) {
     pub fn equals(self: Value, other: Value) bool {
         const all_bools = self.is_boolean() and other.is_boolean();
         const all_nums = self.is_number() and other.is_number();
+        const all_string = self.is_string() and other.is_string();
         const all_nils = self.is_nil() and other.is_nil();
 
-        if (!all_bools and !all_nums and !all_nils) {
+        if (!all_bools and !all_nums and !all_string and !all_nils) {
             return false;
         }
 
         return switch (self) {
             .Bool => self.Bool == other.Bool,
-            .Nil => true,
             .Number => self.Number == other.Number,
+            .String => std.mem.eql(u8, self.String.chars, other.String.chars),
+            .Nil => true,
         };
     }
 
@@ -53,6 +60,10 @@ pub const Value = union(ValueKind) {
         return Value{ .Number = value };
     }
 
+    pub inline fn string(allocator: std.mem.Allocator, value: []const u8) !Value {
+        return Value{ .String = try String.init(allocator, value) };
+    }
+
     pub inline fn nil() Value {
         return Value{ .Nil = {} };
     }
@@ -67,6 +78,13 @@ pub const Value = union(ValueKind) {
     pub inline fn is_number(self: Value) bool {
         return switch (self) {
             .Number => true,
+            else => false,
+        };
+    }
+
+    pub inline fn is_string(self: Value) bool {
+        return switch (self) {
+            .String => true,
             else => false,
         };
     }
@@ -125,4 +143,18 @@ test "is_nil" {
     try testing.expectEqual(false, (Value{ .Bool = true }).is_nil());
     try testing.expectEqual(false, (Value{ .Number = 123.322 }).is_nil());
     try testing.expectEqual(true, (Value{ .Nil = {} }).is_nil());
+}
+
+test "string2obj" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const allocator = arena.allocator();
+    defer arena.deinit();
+
+    const str = String{ .obj = Obj{ .obj_type = ObjType.String }, .chars = "asd" };
+    const val = try Value.string(allocator, str.chars);
+    try testing.expectEqual(true, val.is_string());
+
+    const str2 = val.String;
+    try testing.expectEqual(true, str2.obj.obj_type == ObjType.String);
+    try testing.expect(std.mem.eql(u8, str.chars, str2.chars));
 }

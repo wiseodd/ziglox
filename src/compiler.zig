@@ -7,6 +7,9 @@ const TokenType = @import("token.zig").TokenType;
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
 const Value = @import("value.zig").Value;
+const Obj = @import("object.zig").Obj;
+const ObjType = @import("object.zig").ObjType;
+const String = @import("object.zig").String;
 const FLAGS = @import("flags.zig");
 const debug = @import("debug.zig");
 
@@ -41,6 +44,7 @@ pub const Parser = struct {
     // Type alias
     const ParseRules = std.EnumArray(TokenType, ParseRule);
 
+    arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
     source: []const u8,
     scanner: Scanner,
     compiling_chunk: *Chunk,
@@ -71,7 +75,7 @@ pub const Parser = struct {
         .Less = ParseRule{ .prefix = null, .infix = binary, .precedence = Precedence.Comparison },
         .LessEqual = ParseRule{ .prefix = null, .infix = binary, .precedence = Precedence.Comparison },
         .Identifier = ParseRule{},
-        .String = ParseRule{},
+        .String = ParseRule{ .prefix = string, .infix = null, .precedence = Precedence.None },
         .Number = ParseRule{ .prefix = number, .infix = null, .precedence = Precedence.None },
         .And = ParseRule{},
         .Class = ParseRule{},
@@ -99,6 +103,10 @@ pub const Parser = struct {
             .scanner = Scanner.init(source),
             .compiling_chunk = chunk,
         };
+    }
+
+    pub fn deinit(self: *Parser) void {
+        self.arena.deinit();
     }
 
     pub fn compile(self: *Parser) InterpretError!void {
@@ -161,7 +169,18 @@ pub const Parser = struct {
             self.err("Invalid number string.");
             return;
         };
-        self.emit_constant(Value{ .Number = val });
+        self.emit_constant(Value.number(val));
+    }
+
+    fn string(self: *Parser) void {
+        // A string token is a [_]const u8{'"', ..., '"'} array.
+        // We want to ignore the quotes.
+        const chars = self.previous.start[1 .. self.previous.length - 1];
+        const val = Value.string(self.arena.allocator(), chars) catch {
+            self.err("Error allocating string.");
+            return;
+        };
+        return self.emit_constant(val);
     }
 
     fn unary(self: *Parser) void {
