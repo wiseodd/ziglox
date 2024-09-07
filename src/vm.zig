@@ -3,7 +3,6 @@ const testing = std.testing;
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
 const Value = @import("value.zig").Value;
-const print_value = @import("value.zig").print_value;
 const debug = @import("debug.zig");
 const flags = @import("flags.zig");
 const Parser = @import("compiler.zig").Parser;
@@ -52,7 +51,7 @@ pub const VirtualMachine = struct {
                 std.debug.print("          ", .{});
                 for (self.stack.items) |slot| {
                     std.debug.print("[ ", .{});
-                    print_value(slot);
+                    slot.print();
                     std.debug.print(" ]", .{});
                 }
                 std.debug.print("\n", .{});
@@ -71,17 +70,18 @@ pub const VirtualMachine = struct {
                     const constant: Value = self.read_constant();
                     try self.push(constant);
                 },
-                OpCode.Nil => try self.push(Value.Nil),
-                OpCode.True => try self.push(Value{ .Bool = true }),
-                OpCode.False => try self.push(Value{ .Bool = false }),
+                OpCode.Nil => try self.push(Value.nil()),
+                OpCode.True => try self.push(Value.boolean(true)),
+                OpCode.False => try self.push(Value.boolean(false)),
                 OpCode.Add => try self.binary_op(OpCode.Add),
                 OpCode.Substract => try self.binary_op(OpCode.Substract),
                 OpCode.Multiply => try self.binary_op(OpCode.Multiply),
                 OpCode.Divide => try self.binary_op(OpCode.Divide),
+                OpCode.Not => try self.push(Value.boolean((try self.pop()).is_falsey())),
                 OpCode.Negate => {
                     switch (self.peek(0)) {
                         .Number => {
-                            const negated = Value{ .Number = -(try self.pop()).Number };
+                            const negated = Value.number(-(try self.pop()).Number);
                             try self.push(negated);
                         },
                         else => {
@@ -94,7 +94,7 @@ pub const VirtualMachine = struct {
                     const retval: Value = try self.pop();
 
                     if (flags.DEBUG_TRACE_EXECUTION) {
-                        print_value(retval);
+                        retval.print();
                         std.debug.print("\n", .{});
                     }
 
@@ -173,7 +173,7 @@ pub const VirtualMachine = struct {
             OpCode.Divide => val1 / val2,
             else => return InterpretError.RuntimeError,
         };
-        try self.push(Value{ .Number = res });
+        try self.push(Value.number(res));
     }
 };
 

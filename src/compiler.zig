@@ -62,7 +62,7 @@ pub const Parser = struct {
         .SemiColon = ParseRule{},
         .Slash = ParseRule{ .prefix = null, .infix = binary, .precedence = Precedence.Term },
         .Star = ParseRule{ .prefix = null, .infix = binary, .precedence = Precedence.Term },
-        .Bang = ParseRule{},
+        .Bang = ParseRule{ .prefix = unary, .infix = null, .precedence = Precedence.None },
         .BangEqual = ParseRule{},
         .Equal = ParseRule{},
         .EqualEqual = ParseRule{},
@@ -76,17 +76,17 @@ pub const Parser = struct {
         .And = ParseRule{},
         .Class = ParseRule{},
         .Else = ParseRule{},
-        .False = ParseRule{},
+        .False = ParseRule{ .prefix = literal, .infix = null, .precedence = Precedence.None },
         .For = ParseRule{},
         .Fun = ParseRule{},
         .If = ParseRule{},
-        .Nil = ParseRule{},
+        .Nil = ParseRule{ .prefix = literal, .infix = null, .precedence = Precedence.None },
         .Or = ParseRule{},
         .Print = ParseRule{},
         .Return = ParseRule{},
         .Super = ParseRule{},
         .This = ParseRule{},
-        .True = ParseRule{},
+        .True = ParseRule{ .prefix = literal, .infix = null, .precedence = Precedence.None },
         .Var = ParseRule{},
         .While = ParseRule{},
         .Error = ParseRule{},
@@ -176,6 +176,7 @@ pub const Parser = struct {
         // code is written operator-first e.g. `-(2 + 3)` because our VM is a stack.
         // I.e. we want to pop `5` first, then negeate it, then push the result.
         switch (operator_type) {
+            TokenType.Bang => self.emit_byte(@intFromEnum(OpCode.Not)),
             TokenType.Minus => self.emit_byte(@intFromEnum(OpCode.Negate)),
             else => return, // Unreacable
         }
@@ -193,6 +194,15 @@ pub const Parser = struct {
             TokenType.Minus => self.emit_byte(@intFromEnum(OpCode.Substract)),
             TokenType.Star => self.emit_byte(@intFromEnum(OpCode.Multiply)),
             TokenType.Slash => self.emit_byte(@intFromEnum(OpCode.Divide)),
+            else => return,
+        }
+    }
+
+    fn literal(self: *Parser) void {
+        switch (self.previous.token_type) {
+            TokenType.False => self.emit_byte(@intFromEnum(OpCode.False)),
+            TokenType.Nil => self.emit_byte(@intFromEnum(OpCode.Nil)),
+            TokenType.True => self.emit_byte(@intFromEnum(OpCode.True)),
             else => return,
         }
     }

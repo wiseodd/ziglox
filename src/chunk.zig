@@ -13,6 +13,7 @@ pub const OpCode = enum(u8) {
     Substract,
     Multiply,
     Divide,
+    Not,
     Negate,
     Return,
 };
