@@ -6,6 +6,7 @@ const Value = @import("value.zig").Value;
 const debug = @import("debug.zig");
 const flags = @import("flags.zig");
 const Parser = @import("compiler.zig").Parser;
+const String = @import("object.zig").String;
 
 pub const InterpretError = error{
     CompileError,
@@ -82,7 +83,31 @@ pub const VirtualMachine = struct {
                 },
                 OpCode.Greater => try self.binary_op(OpCode.Greater),
                 OpCode.Less => try self.binary_op(OpCode.Less),
-                OpCode.Add => try self.binary_op(OpCode.Add),
+                OpCode.Add => {
+                    if (self.peek(0).is_string() and self.peek(1).is_string()) {
+                        const str2: []const u8 = (try self.pop()).String.chars;
+                        const str1: []const u8 = (try self.pop()).String.chars;
+
+                        var res_chars = self.allocator.alloc(u8, str1.len + str2.len) catch {
+                            return InterpretError.RuntimeError;
+                        };
+                        @memcpy(res_chars[0..str1.len], str1);
+                        @memcpy(res_chars[str1.len..], str2);
+                        const res_val = Value.string(self.allocator, res_chars) catch {
+                            return InterpretError.RuntimeError;
+                        };
+
+                        try self.push(res_val);
+                    } else if (self.peek(0).is_number() and self.peek(1).is_number()) {
+                        const num2: f64 = (try self.pop()).Number;
+                        const num1: f64 = (try self.pop()).Number;
+                        const res_val = Value.number(num1 + num2);
+
+                        try self.push(res_val);
+                    } else {
+                        self.runtime_error("Operands must be two numbers or two strings", .{});
+                    }
+                },
                 OpCode.Substract => try self.binary_op(OpCode.Substract),
                 OpCode.Multiply => try self.binary_op(OpCode.Multiply),
                 OpCode.Divide => try self.binary_op(OpCode.Divide),
@@ -368,7 +393,6 @@ test "vm_binary_op_nan_right" {
     try vm.chunk.write_code(@intFromEnum(OpCode.Return), 123);
 
     vm.ip = vm.chunk.code.items.ptr;
-
     try testing.expectError(InterpretError.RuntimeError, vm.run());
 
     const instruction: usize = @intFromPtr(vm.ip) - @intFromPtr(vm.chunk.code.items.ptr) - 1;
