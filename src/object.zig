@@ -21,14 +21,20 @@ pub const Obj = struct {
 };
 
 pub const String = struct {
+    allocator: Allocator,
     obj: Obj,
     chars: []const u8,
 
     pub fn init(allocator: Allocator, chars: []const u8) !String {
         return String{
+            .allocator = allocator,
             .obj = Obj.init(ObjType.String),
             .chars = try allocator.dupe(u8, chars),
         };
+    }
+
+    pub fn deinit(self: String) void {
+        self.allocator.free(self.chars);
     }
 
     pub fn print(self: *String) void {
@@ -37,12 +43,14 @@ pub const String = struct {
 };
 
 test "string_init" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    const allocator = arena.allocator();
-    defer arena.deinit();
+    const allocator = testing.allocator;
 
-    const str = String{ .obj = Obj{ .obj_type = ObjType.String }, .chars = "asd" };
-    const str2 = try String.init(allocator, str.chars);
+    const str1 = try String.init(allocator, "Hello World!");
+    defer str1.deinit();
+
+    const str2 = try String.init(allocator, str1.chars);
+    defer str2.deinit();
+
     try testing.expectEqual(true, str2.obj.obj_type == ObjType.String);
-    try testing.expect(std.mem.eql(u8, str.chars, str2.chars));
+    try testing.expect(std.mem.eql(u8, str1.chars, str2.chars));
 }

@@ -14,17 +14,17 @@ pub const InterpretError = error{
 };
 
 pub const VirtualMachine = struct {
+    allocator: std.mem.Allocator,
     chunk: Chunk,
     ip: [*]u8,
     stack: std.ArrayList(Value),
-    allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) VirtualMachine {
         return VirtualMachine{
+            .allocator = allocator,
             .chunk = Chunk.init(allocator),
             .ip = undefined,
             .stack = std.ArrayList(Value).init(allocator),
-            .allocator = allocator,
         };
     }
 
@@ -34,9 +34,7 @@ pub const VirtualMachine = struct {
     }
 
     pub fn interpret(self: *VirtualMachine, source: []const u8) InterpretError!void {
-        var parser = Parser.init(source, &self.chunk);
-        defer parser.deinit();
-
+        var parser = Parser.init(self.allocator, source, &self.chunk);
         try parser.compile();
 
         // Initialize the instruction pointer to the start of the chunk's bytecode

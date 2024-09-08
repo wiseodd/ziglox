@@ -44,7 +44,7 @@ pub const Parser = struct {
     // Type alias
     const ParseRules = std.EnumArray(TokenType, ParseRule);
 
-    arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator),
+    allocator: std.mem.Allocator,
     source: []const u8,
     scanner: Scanner,
     compiling_chunk: *Chunk,
@@ -97,16 +97,13 @@ pub const Parser = struct {
         .EOF = ParseRule{},
     }),
 
-    pub fn init(source: []const u8, chunk: *Chunk) Parser {
+    pub fn init(allocator: std.mem.Allocator, source: []const u8, chunk: *Chunk) Parser {
         return Parser{
+            .allocator = allocator,
             .source = source,
             .scanner = Scanner.init(source),
             .compiling_chunk = chunk,
         };
-    }
-
-    pub fn deinit(self: *Parser) void {
-        self.arena.deinit();
     }
 
     pub fn compile(self: *Parser) InterpretError!void {
@@ -176,7 +173,7 @@ pub const Parser = struct {
         // A string token is a [_]const u8{'"', ..., '"'} array.
         // We want to ignore the quotes.
         const chars = self.previous.start[1 .. self.previous.length - 1];
-        const val = Value.string(self.arena.allocator(), chars) catch {
+        const val = Value.string(self.allocator, chars) catch {
             self.err("Error allocating string.");
             return;
         };
@@ -325,7 +322,7 @@ test "compile_unary" {
         var chunk = Chunk.init(allocator);
         defer chunk.deinit();
 
-        var parser = Parser.init(source, &chunk);
+        var parser = Parser.init(allocator, source, &chunk);
         try parser.compile();
 
         // OpCode.Constant (2 bytes), OpCode.Negate (1 byte), OpCode.Return (1 byte)
@@ -343,7 +340,7 @@ test "compile_binary" {
         var chunk = Chunk.init(allocator);
         defer chunk.deinit();
 
-        var parser = Parser.init(source, &chunk);
+        var parser = Parser.init(allocator, source, &chunk);
         try parser.compile();
 
         // OpCode.Constant (4 bytes), OpCode.{Operator} (1 byte), OpCode.Return (1 byte)
@@ -357,7 +354,7 @@ test "compile_empty" {
     var chunk = Chunk.init(allocator);
     defer chunk.deinit();
 
-    var parser = Parser.init("", &chunk);
+    var parser = Parser.init(allocator, "", &chunk);
     try testing.expectError(InterpretError.CompileError, parser.compile());
 }
 
@@ -367,7 +364,7 @@ test "compile_syntax_error" {
         var chunk = Chunk.init(allocator);
         defer chunk.deinit();
 
-        var parser = Parser.init(source, &chunk);
+        var parser = Parser.init(allocator, source, &chunk);
         try testing.expectError(InterpretError.CompileError, parser.compile());
     }
 }
