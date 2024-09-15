@@ -122,14 +122,12 @@ pub const VirtualMachine = struct {
                         },
                     }
                 },
+                OpCode.Print => {
+                    const value: Value = try self.pop();
+                    value.print();
+                    std.debug.print("\n", .{});
+                },
                 OpCode.Return => {
-                    const retval: Value = try self.pop();
-
-                    if (flags.DEBUG_TRACE_EXECUTION) {
-                        retval.print();
-                        std.debug.print("\n", .{});
-                    }
-
                     return;
                 },
             }

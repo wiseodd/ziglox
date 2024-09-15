@@ -108,8 +108,11 @@ pub const Parser = struct {
 
     pub fn compile(self: *Parser) InterpretError!void {
         self.advance();
-        self.expression();
-        self.consume(TokenType.EOF, "Expect end of expression.");
+
+        while (!self.match(TokenType.EOF)) {
+            self.declaration();
+        }
+
         self.end_compiler();
 
         if (self.had_error) return InterpretError.CompileError;
@@ -137,6 +140,21 @@ pub const Parser = struct {
         }
     }
 
+    fn match(self: *Parser, token_type: TokenType) bool {
+        // If the current token has type `token_type`, advance the parser
+        // and return true.
+        if (!self.check(token_type)) {
+            return false;
+        }
+
+        self.advance();
+        return true;
+    }
+
+    fn check(self: *Parser, token_type: TokenType) bool {
+        return self.current.token_type == token_type;
+    }
+
     fn end_compiler(self: *Parser) void {
         self.emit_return();
 
@@ -151,6 +169,22 @@ pub const Parser = struct {
         // Compile all expressions that have higher or equal level of precedence
         // than assignment `=` (the lowest precedence level).
         self.parse_precedence(Precedence.Assignment);
+    }
+
+    fn declaration(self: *Parser) void {
+        self.statement();
+    }
+
+    fn statement(self: *Parser) void {
+        if (self.match(TokenType.Print)) {
+            self.print_statement();
+        }
+    }
+
+    fn print_statement(self: *Parser) void {
+        self.expression();
+        self.consume(TokenType.SemiColon, "Expect ';' after value.");
+        self.emit_byte(@intFromEnum(OpCode.Print));
     }
 
     fn grouping(self: *Parser) void {

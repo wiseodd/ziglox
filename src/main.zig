@@ -41,6 +41,7 @@ fn repl(vm: *VirtualMachine, allocator: std.mem.Allocator) !void {
             _ = vm.interpret(input) catch {
                 std.debug.print("Not implemented yet!\n", .{});
             };
+            break;
         } else {
             std.debug.print("\n", .{});
             break;
