@@ -79,6 +79,7 @@ pub const VirtualMachine = struct {
                     const a = try self.pop();
                     try self.push(Value.boolean(a.equals(b)));
                 },
+                OpCode.Pop => _ = try self.pop(),
                 OpCode.Greater => try self.binary_op(OpCode.Greater),
                 OpCode.Less => try self.binary_op(OpCode.Less),
                 OpCode.Add => {

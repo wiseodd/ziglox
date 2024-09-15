@@ -31,6 +31,7 @@ pub fn disassemble_instruction(chunk: *Chunk, offset: usize) usize {
         OpCode.True => return simple_instruction("OP_TRUE", offset),
         OpCode.False => return simple_instruction("OP_FALSE", offset),
         OpCode.Equal => return simple_instruction("OP_EQUAL", offset),
+        OpCode.Pop => return simple_instruction("OP_POP", offset),
         OpCode.Greater => return simple_instruction("OP_GREATER", offset),
         OpCode.Less => return simple_instruction("OP_LESS", offset),
         OpCode.Add => return simple_instruction("OP_ADD", offset),

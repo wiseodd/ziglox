@@ -171,13 +171,26 @@ pub const Parser = struct {
         self.parse_precedence(Precedence.Assignment);
     }
 
+    fn expression_statement(self: *Parser) void {
+        // E.g.: `var x = 1 + 1;`
+        self.expression();
+        self.consume(TokenType.SemiColon, "Expect ';' after expression.");
+        self.emit_byte(@intFromEnum(OpCode.Pop));
+    }
+
     fn declaration(self: *Parser) void {
         self.statement();
+
+        if (self.panic_mode) {
+            self.synchronize();
+        }
     }
 
     fn statement(self: *Parser) void {
         if (self.match(TokenType.Print)) {
             self.print_statement();
+        } else {
+            self.expression_statement();
         }
     }
 
@@ -185,6 +198,26 @@ pub const Parser = struct {
         self.expression();
         self.consume(TokenType.SemiColon, "Expect ';' after value.");
         self.emit_byte(@intFromEnum(OpCode.Print));
+    }
+
+    fn synchronize(self: *Parser) void {
+        self.panic_mode = false;
+
+        // Move the current parser's "cursor" forward to a token that resembles
+        // a statement boundary. E.g., a semicolon (end of a statement) or the
+        // beginning of a new statement (`if`, `var`, etc.).
+        while (self.current.token_type != TokenType.EOF) {
+            if (self.previous.token_type == TokenType.SemiColon) {
+                return;
+            }
+
+            switch (self.current.token_type) {
+                TokenType.Class, TokenType.Fun, TokenType.Var, TokenType.For, TokenType.If, TokenType.While, TokenType.Print, TokenType.Return => return,
+                else => continue,
+            }
+
+            self.advance();
+        }
     }
 
     fn grouping(self: *Parser) void {
