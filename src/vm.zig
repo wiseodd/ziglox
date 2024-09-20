@@ -18,6 +18,8 @@ pub const VirtualMachine = struct {
     chunk: Chunk,
     ip: [*]u8,
     stack: std.ArrayList(Value),
+    strings: std.StringHashMap(Value),
+    globals: std.StringHashMap(Value),
 
     pub fn init(allocator: std.mem.Allocator) VirtualMachine {
         return VirtualMachine{
@@ -25,16 +27,20 @@ pub const VirtualMachine = struct {
             .chunk = Chunk.init(allocator),
             .ip = undefined,
             .stack = std.ArrayList(Value).init(allocator),
+            .strings = std.StringHashMap(Value).init(allocator),
+            .globals = std.StringHashMap(Value).init(allocator),
         };
     }
 
     pub fn deinit(self: *VirtualMachine) void {
         self.chunk.deinit();
         self.stack.deinit();
+        self.strings.deinit();
+        self.globals.deinit();
     }
 
     pub fn interpret(self: *VirtualMachine, source: []const u8) InterpretError!void {
-        var parser = Parser.init(self.allocator, source, &self.chunk);
+        var parser = Parser.init(self.allocator, source, &self.chunk, &self.strings);
         try parser.compile();
 
         // Initialize the instruction pointer to the start of the chunk's bytecode
@@ -80,6 +86,13 @@ pub const VirtualMachine = struct {
                     try self.push(Value.boolean(a.equals(b)));
                 },
                 OpCode.Pop => _ = try self.pop(),
+                OpCode.DefineGlobal => {
+                    const name: []const u8 = try self.read_string();
+                    self.globals.put(name, self.peek(0)) catch {
+                        return InterpretError.RuntimeError;
+                    };
+                    _ = try self.pop();
+                },
                 OpCode.Greater => try self.binary_op(OpCode.Greater),
                 OpCode.Less => try self.binary_op(OpCode.Less),
                 OpCode.Add => {
@@ -92,7 +105,11 @@ pub const VirtualMachine = struct {
                         };
                         @memcpy(res_chars[0..str1.len], str1);
                         @memcpy(res_chars[str1.len..], str2);
-                        const res_val = Value.string(self.allocator, res_chars) catch {
+                        const res_val = Value.string(
+                            self.allocator,
+                            res_chars,
+                            &self.strings,
+                        ) catch {
                             return InterpretError.RuntimeError;
                         };
 
@@ -185,6 +202,13 @@ pub const VirtualMachine = struct {
 
     inline fn read_constant(self: *VirtualMachine) Value {
         return self.chunk.constants.items[self.read_byte()];
+    }
+
+    inline fn read_string(self: *VirtualMachine) InterpretError![]const u8 {
+        switch (self.read_constant()) {
+            .String => |val| return val.chars,
+            else => return InterpretError.RuntimeError,
+        }
     }
 
     inline fn binary_op(self: *VirtualMachine, op: OpCode) InterpretError!void {

@@ -60,8 +60,12 @@ pub const Value = union(enum) {
         return Value{ .Number = value };
     }
 
-    pub inline fn string(allocator: std.mem.Allocator, value: []const u8) !Value {
-        return Value{ .String = try String.init(allocator, value) };
+    pub inline fn string(
+        allocator: std.mem.Allocator,
+        value: []const u8,
+        table: *std.StringHashMap(Value),
+    ) !Value {
+        return Value{ .String = try String.init(allocator, value, table) };
     }
 
     pub inline fn nil() Value {

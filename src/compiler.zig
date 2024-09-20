@@ -1,5 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
+const VirtualMachine = @import("vm.zig").VirtualMachine;
 const InterpretError = @import("vm.zig").InterpretError;
 const Scanner = @import("scanner.zig").Scanner;
 const Token = @import("token.zig").Token;
@@ -48,6 +49,7 @@ pub const Parser = struct {
     source: []const u8,
     scanner: Scanner,
     compiling_chunk: *Chunk,
+    strings: *std.StringHashMap(Value),
     current: Token = undefined,
     previous: Token = undefined,
     had_error: bool = false,
@@ -97,12 +99,18 @@ pub const Parser = struct {
         .EOF = ParseRule{},
     }),
 
-    pub fn init(allocator: std.mem.Allocator, source: []const u8, chunk: *Chunk) Parser {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        source: []const u8,
+        chunk: *Chunk,
+        strings: *std.StringHashMap(Value),
+    ) Parser {
         return Parser{
             .allocator = allocator,
             .source = source,
             .scanner = Scanner.init(source),
             .compiling_chunk = chunk,
+            .strings = strings,
         };
     }
 
@@ -178,8 +186,26 @@ pub const Parser = struct {
         self.emit_byte(@intFromEnum(OpCode.Pop));
     }
 
+    fn var_declaration(self: *Parser) void {
+        const global: u8 = self.parse_variable("Expect variable name.");
+
+        if (self.match(TokenType.Equal)) {
+            self.expression();
+        } else {
+            // If no value is explicitly assigned, assign Nil.
+            self.emit_byte(@intFromEnum(OpCode.Nil));
+        }
+
+        self.consume(TokenType.SemiColon, "Expect ';' after variable declaration.");
+        self.define_variable(global);
+    }
+
     fn declaration(self: *Parser) void {
-        self.statement();
+        if (self.match(TokenType.Var)) {
+            self.var_declaration();
+        } else {
+            self.statement();
+        }
 
         if (self.panic_mode) {
             self.synchronize();
@@ -240,7 +266,7 @@ pub const Parser = struct {
         // A string token is a [_]const u8{'"', ..., '"'} array.
         // We want to ignore the quotes.
         const chars = self.previous.start[1 .. self.previous.length - 1];
-        const val = Value.string(self.allocator, chars) catch {
+        const val = Value.string(self.allocator, chars, self.strings) catch {
             self.err("Error allocating string.");
             return;
         };
@@ -323,6 +349,30 @@ pub const Parser = struct {
             };
             infix_rule(self);
         }
+    }
+
+    fn parse_variable(self: *Parser, error_message: []const u8) u8 {
+        self.consume(TokenType.Identifier, error_message);
+        return self.identifier_constant(&self.previous);
+    }
+
+    fn identifier_constant(self: *Parser, name: *Token) u8 {
+        const obj_str: Value = Value.string(
+            self.allocator,
+            name.start[0..name.length],
+            self.strings,
+        ) catch {
+            self.err("Unable to initialize variable name.");
+            // TODO: Handle allocation error.
+            return 0;
+        };
+        return self.make_constant(obj_str);
+    }
+
+    fn define_variable(self: *Parser, global: u8) void {
+        // Global points to the index of the constant table.
+        // The variable name (string) is stored there.
+        self.emit_bytes(@intFromEnum(OpCode.DefineGlobal), global);
     }
 
     fn emit_byte(self: *Parser, byte: u8) void {

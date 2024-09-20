@@ -1,6 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
+const Value = @import("value.zig").Value;
 
 pub const ObjType = enum {
     String,
@@ -25,11 +26,24 @@ pub const String = struct {
     obj: Obj,
     chars: []const u8,
 
-    pub fn init(allocator: Allocator, chars: []const u8) !String {
+    pub fn init(allocator: Allocator, chars: []const u8, table: *std.StringHashMap(Value)) !String {
+        // For string interning.
+        // Return the stored strings if the char-array arg has been defined before.
+        var char_copy: []const u8 = undefined;
+
+        if (table.getKeyPtr(chars)) |key_ptr| {
+            char_copy = key_ptr.*;
+        } else {
+            // Automatically store a string in the VM's hashmap whenever one is allocated.
+            // This way it can be used later if the user allocates the same char-array.
+            char_copy = try allocator.dupe(u8, chars);
+            try table.put(char_copy, Value.nil());
+        }
+
         return String{
             .allocator = allocator,
             .obj = Obj.init(ObjType.String),
-            .chars = try allocator.dupe(u8, chars),
+            .chars = char_copy,
         };
     }
 
