@@ -31,8 +31,8 @@ pub const String = struct {
         // Return the stored strings if the char-array arg has been defined before.
         var char_copy: []const u8 = undefined;
 
-        if (table.getKeyPtr(chars)) |key_ptr| {
-            char_copy = key_ptr.*;
+        if (table.getKey(chars)) |key| {
+            char_copy = key;
         } else {
             // Automatically store a string in the VM's hashmap whenever one is allocated.
             // This way it can be used later if the user allocates the same char-array.

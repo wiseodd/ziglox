@@ -76,7 +76,7 @@ pub const Parser = struct {
         .GreaterEqual = ParseRule{ .prefix = null, .infix = binary, .precedence = Precedence.Comparison },
         .Less = ParseRule{ .prefix = null, .infix = binary, .precedence = Precedence.Comparison },
         .LessEqual = ParseRule{ .prefix = null, .infix = binary, .precedence = Precedence.Comparison },
-        .Identifier = ParseRule{},
+        .Identifier = ParseRule{ .prefix = variable, .infix = null, .precedence = Precedence.None },
         .String = ParseRule{ .prefix = string, .infix = null, .precedence = Precedence.None },
         .Number = ParseRule{ .prefix = number, .infix = null, .precedence = Precedence.None },
         .And = ParseRule{},
@@ -273,6 +273,15 @@ pub const Parser = struct {
         return self.emit_constant(val);
     }
 
+    fn variable(self: *Parser) void {
+        self.named_variable(self.previous);
+    }
+
+    fn named_variable(self: *Parser, name: Token) void {
+        const arg: u8 = self.identifier_constant(@constCast(&name));
+        self.emit_bytes(@intFromEnum(OpCode.GetGlobal), arg);
+    }
+
     fn unary(self: *Parser) void {
         // The unary operator type
         const operator_type = self.previous.token_type;
@@ -353,7 +362,7 @@ pub const Parser = struct {
 
     fn parse_variable(self: *Parser, error_message: []const u8) u8 {
         self.consume(TokenType.Identifier, error_message);
-        return self.identifier_constant(&self.previous);
+        return self.identifier_constant(@constCast(&self.previous));
     }
 
     fn identifier_constant(self: *Parser, name: *Token) u8 {

@@ -86,6 +86,16 @@ pub const VirtualMachine = struct {
                     try self.push(Value.boolean(a.equals(b)));
                 },
                 OpCode.Pop => _ = try self.pop(),
+                OpCode.GetGlobal => {
+                    const name: []const u8 = try self.read_string();
+
+                    if (self.globals.get(name)) |value| {
+                        try self.push(value);
+                    } else {
+                        self.runtime_error("Undefined variable '{s}'.", .{name});
+                        return InterpretError.RuntimeError;
+                    }
+                },
                 OpCode.DefineGlobal => {
                     const name: []const u8 = try self.read_string();
                     self.globals.put(name, self.peek(0)) catch {
