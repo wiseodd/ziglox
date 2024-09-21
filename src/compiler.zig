@@ -33,7 +33,7 @@ const Precedence = enum {
 
 pub const Parser = struct {
     // Type alias for parser functions (`unary`, `binary`, etc.)
-    const ParseFn = fn (*Parser) void;
+    const ParseFn = fn (*Parser, bool) void;
 
     // Rule for parsing
     const ParseRule = struct {
@@ -246,14 +246,20 @@ pub const Parser = struct {
         }
     }
 
-    fn grouping(self: *Parser) void {
+    fn grouping(self: *Parser, can_assign: bool) void {
+        // Ignore
+        _ = can_assign;
+
         // The left paren has been consumed, so we can directly
         // evaluate the expression inside the grouping recursively
         self.expression();
         self.consume(TokenType.RightParen, "Expect ')' after expression.");
     }
 
-    fn number(self: *Parser) void {
+    fn number(self: *Parser, can_assign: bool) void {
+        // Ignore
+        _ = can_assign;
+
         const lexeme: []const u8 = self.previous.start[0..self.previous.length];
         const val: f64 = std.fmt.parseFloat(f64, lexeme) catch {
             self.err("Invalid number string.");
@@ -262,7 +268,10 @@ pub const Parser = struct {
         self.emit_constant(Value.number(val));
     }
 
-    fn string(self: *Parser) void {
+    fn string(self: *Parser, can_assign: bool) void {
+        // Ignore
+        _ = can_assign;
+
         // A string token is a [_]const u8{'"', ..., '"'} array.
         // We want to ignore the quotes.
         const chars = self.previous.start[1 .. self.previous.length - 1];
@@ -273,16 +282,28 @@ pub const Parser = struct {
         return self.emit_constant(val);
     }
 
-    fn variable(self: *Parser) void {
-        self.named_variable(self.previous);
+    fn variable(self: *Parser, can_assign: bool) void {
+        self.named_variable(self.previous, can_assign);
     }
 
-    fn named_variable(self: *Parser, name: Token) void {
+    fn named_variable(self: *Parser, name: Token, can_assign: bool) void {
         const arg: u8 = self.identifier_constant(@constCast(&name));
-        self.emit_bytes(@intFromEnum(OpCode.GetGlobal), arg);
+
+        // If current token is "=" then it's an assignment statement.
+        // In this case, we parse the expression in the r.h.s., and then emit
+        // bytecode for "set" instead of "get".
+        if (can_assign and self.match(TokenType.Equal)) {
+            self.expression();
+            self.emit_bytes(@intFromEnum(OpCode.SetGlobal), arg);
+        } else {
+            self.emit_bytes(@intFromEnum(OpCode.GetGlobal), arg);
+        }
     }
 
-    fn unary(self: *Parser) void {
+    fn unary(self: *Parser, can_assign: bool) void {
+        // Ignore
+        _ = can_assign;
+
         // The unary operator type
         const operator_type = self.previous.token_type;
 
@@ -300,7 +321,10 @@ pub const Parser = struct {
         }
     }
 
-    fn binary(self: *Parser) void {
+    fn binary(self: *Parser, can_assign: bool) void {
+        // Ignore
+        _ = can_assign;
+
         const operator_type: TokenType = self.previous.token_type;
         const parse_rule: *const ParseRule = self.parse_rules.getPtrConst(operator_type);
 
@@ -322,7 +346,10 @@ pub const Parser = struct {
         }
     }
 
-    fn literal(self: *Parser) void {
+    fn literal(self: *Parser, can_assign: bool) void {
+        // Ignore
+        _ = can_assign;
+
         switch (self.previous.token_type) {
             TokenType.False => self.emit_byte(@intFromEnum(OpCode.False)),
             TokenType.Nil => self.emit_byte(@intFromEnum(OpCode.Nil)),
@@ -346,17 +373,31 @@ pub const Parser = struct {
             return;
         };
 
-        // Compile the prefix of the expression
-        prefix_rule(self);
+        // Check whether the precedence is low enough to allow for assignment.
+        // This is to handle e.g. `a * b = c + d`. `b` has too high of a precedent
+        // compared to `=`, so `a * b` must be parsed first and it cannot be assigned
+        // by `c + d`. If we don't do this, then we can arrive at `a * (b = c + d)`.
+        const can_assign = @intFromEnum(precedence) <= @intFromEnum(Precedence.Assignment);
 
-        // Compile the inf
+        // Compile the prefix of the expression
+        prefix_rule(self, can_assign);
+
+        // Compile the infix
         while (@intFromEnum(precedence) <= @intFromEnum(self.parse_rules.getPtrConst(self.current.token_type).precedence)) {
             self.advance();
             const infix_rule = self.parse_rules.getPtrConst(self.previous.token_type).infix orelse {
                 self.err("Expect expression.");
                 return;
             };
-            infix_rule(self);
+            infix_rule(self, can_assign);
+        }
+
+        // There is no infix parsing rule for `=`. So, if `=` exists in the infix,
+        // it won't be consumed. If that so, nothing else will. It's an error.
+        // This is to handle the example above: `a * b = c + d`. Notice that `=` is
+        // parsed last.
+        if (can_assign and self.match(TokenType.Equal)) {
+            self.err("Invalid assignment target.");
         }
     }
 

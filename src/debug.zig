@@ -32,6 +32,7 @@ pub fn disassemble_instruction(chunk: *Chunk, offset: usize) usize {
         OpCode.False => return simple_instruction("OP_FALSE", offset),
         OpCode.GetGlobal => return constant_instruction("OP_GET_GLOBAL", chunk, offset),
         OpCode.DefineGlobal => return constant_instruction("OP_DEFINE_GLOBAL", chunk, offset),
+        OpCode.SetGlobal => return constant_instruction("OP_SET_GLOBAL", chunk, offset),
         OpCode.Equal => return simple_instruction("OP_EQUAL", offset),
         OpCode.Pop => return simple_instruction("OP_POP", offset),
         OpCode.Greater => return simple_instruction("OP_GREATER", offset),

@@ -103,6 +103,18 @@ pub const VirtualMachine = struct {
                     };
                     _ = try self.pop();
                 },
+                OpCode.SetGlobal => {
+                    const name: []const u8 = try self.read_string();
+
+                    if (!self.globals.contains(name)) {
+                        self.runtime_error("Undefined variable '{s}'", .{name});
+                        return InterpretError.RuntimeError;
+                    }
+
+                    self.globals.put(name, self.peek(0)) catch {
+                        return InterpretError.RuntimeError;
+                    };
+                },
                 OpCode.Greater => try self.binary_op(OpCode.Greater),
                 OpCode.Less => try self.binary_op(OpCode.Less),
                 OpCode.Add => {
