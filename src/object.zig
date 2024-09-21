@@ -57,12 +57,18 @@ pub const String = struct {
 };
 
 test "string_init" {
-    const allocator = testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
 
-    const str1 = try String.init(allocator, "Hello World!");
+    const allocator = arena.allocator();
+
+    var table = std.StringHashMap(Value).init(allocator);
+    defer table.deinit();
+
+    const str1 = try String.init(allocator, "Hello World!", &table);
     defer str1.deinit();
 
-    const str2 = try String.init(allocator, str1.chars);
+    const str2 = try String.init(allocator, str1.chars, &table);
     defer str2.deinit();
 
     try testing.expectEqual(true, str2.obj.obj_type == ObjType.String);

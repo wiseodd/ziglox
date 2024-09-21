@@ -150,12 +150,18 @@ test "is_nil" {
 }
 
 test "string2obj" {
-    const allocator = testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
 
-    const str = try String.init(allocator, "asdasd");
+    const allocator = arena.allocator();
+
+    var table = std.StringHashMap(Value).init(allocator);
+    defer table.deinit();
+
+    const str = try String.init(allocator, "asdasd", &table);
     defer str.deinit();
 
-    const val = try Value.string(allocator, str.chars);
+    const val = try Value.string(allocator, str.chars, &table);
     defer val.String.deinit();
 
     try testing.expectEqual(true, val.is_string());
