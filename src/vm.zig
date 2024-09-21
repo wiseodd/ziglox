@@ -86,6 +86,14 @@ pub const VirtualMachine = struct {
                     try self.push(Value.boolean(a.equals(b)));
                 },
                 OpCode.Pop => _ = try self.pop(),
+                OpCode.GetLocal => {
+                    const slot: usize = @intCast(self.read_byte());
+                    try self.push(self.stack.items[slot]);
+                },
+                OpCode.SetLocal => {
+                    const slot: usize = @intCast(self.read_byte());
+                    self.stack.items[slot] = self.peek(0);
+                },
                 OpCode.GetGlobal => {
                     const name: []const u8 = try self.read_string();
 

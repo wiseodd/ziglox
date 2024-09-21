@@ -1,0 +1,9 @@
+var z = "global";
+
+{
+  var a = "outer";
+
+  {
+    var b = "inner";
+  }
+}
