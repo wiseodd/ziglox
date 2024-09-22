@@ -248,6 +248,42 @@ pub const Parser = struct {
         self.emit_byte(@intFromEnum(OpCode.Pop));
     }
 
+    fn if_statement(self: *Parser) void {
+        // Parse the `if` condition.
+        self.consume(TokenType.LeftParen, "Expect '(' after 'if'.");
+        self.expression();
+        self.consume(TokenType.RightParen, "Expect ')' after condition.");
+
+        // Create a placeholder for jump instruction to skip the `if` block.
+        const then_jump: usize = self.emit_jump(OpCode.JumpIfFalse);
+
+        // Pop the value corresponding to the `if` condition *if* the `if` block is
+        // executed (`JumpIfFalse` is not executed). Otherwise this will be jumped over.
+        self.emit_byte(@intFromEnum(OpCode.Pop));
+
+        // Parse the `if` block.
+        self.statement();
+
+        // Create a placeholder for jump instruction to skip the `else` block.
+        const else_jump: usize = self.emit_jump(OpCode.Jump);
+
+        // At this point, we know how much jump to make to skip the `if` block and
+        // the else-jump instructions.
+        self.patch_jump(then_jump);
+
+        // Pop the value corresponding to the `if` condition *if* the `else` block is
+        // executed (`JumpIfFalse` is executed). Otherwise this will be jumped over.
+        self.emit_byte(@intFromEnum(OpCode.Pop));
+
+        // Parse the `else` block.
+        if (self.match(TokenType.Else)) {
+            self.statement();
+        }
+
+        // At this point, we know how much jump to make to skip the `else` block.
+        self.patch_jump(else_jump);
+    }
+
     fn var_declaration(self: *Parser) void {
         const global: u8 = self.parse_variable("Expect variable name.");
 
@@ -277,6 +313,8 @@ pub const Parser = struct {
     fn statement(self: *Parser) void {
         if (self.match(TokenType.Print)) {
             self.print_statement();
+        } else if (self.match(TokenType.If)) {
+            self.if_statement();
         } else if (self.match(TokenType.LeftBrace)) {
             self.begin_scope();
             self.block();
@@ -597,6 +635,18 @@ pub const Parser = struct {
         self.emit_byte(byte2);
     }
 
+    fn emit_jump(self: *Parser, instruction: OpCode) usize {
+        self.emit_byte(@intFromEnum(instruction));
+
+        // 2 bytes for the jump offset. 0xff is a placeholder value since we don't
+        // know the offset yet --- we haven't parsed e.g. the `if` body at this point.
+        self.emit_byte(0xff);
+        self.emit_byte(0xff);
+
+        // Return the offset of *the instruction*, not the operand.
+        return self.current_chunk().code.items.len - 2;
+    }
+
     fn emit_return(self: *Parser) void {
         self.emit_byte(@intFromEnum(OpCode.Return));
     }
@@ -612,6 +662,30 @@ pub const Parser = struct {
         };
 
         return @intCast(idx);
+    }
+
+    fn patch_jump(self: *Parser, offset: usize) void {
+        // Calculate how much jump do we want to do.
+        // `code.items` now contains all instructions in the e.g. `if` block since
+        // this function is called after we're done parsing them. At this point, we know
+        // exactly how much jump we want to make.
+        // Note that, -2 is for the 2-byte jump offset operand. See `emit_jump`.
+        const jump: usize = self.current_chunk().code.items.len - offset - 2;
+
+        // Can only do 2-byte jumps.
+        if (jump > std.math.maxInt(u16)) {
+            self.err("Too much code to jump over.");
+        }
+
+        // Replace the placeholder value 0xff in the jump offset operads set by
+        // `emit_jump`.
+        // -----------------------------------------------------------------------------
+        // `jump >> 8` means we discard the first 8 least significant bits, eqivalently,
+        // `jump / 2^8`. Then, `num & 0xff` keeps only the lowes 8 bits.
+        // So, the first one keeps the 8 most significant bits of u16, while the second
+        // keeps the 8 least significant bits of u16.
+        self.current_chunk().code.items[offset] = @intCast((jump >> 8) & 0xff);
+        self.current_chunk().code.items[offset + 1] = @intCast(jump & 0xff);
     }
 
     fn current_chunk(self: *Parser) *Chunk {

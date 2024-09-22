@@ -46,6 +46,8 @@ pub fn disassemble_instruction(chunk: *Chunk, offset: usize) usize {
         OpCode.Not => return simple_instruction("OP_NOT", offset),
         OpCode.Negate => return simple_instruction("OP_NEGATE", offset),
         OpCode.Print => return simple_instruction("OP_PRINT", offset),
+        OpCode.Jump => return jump_instruction("OP_JUMP", 1, chunk, offset),
+        OpCode.JumpIfFalse => return jump_instruction("OP_JUMP_IF_FALSE", 1, chunk, offset),
         OpCode.Return => return simple_instruction("OP_RETURN", offset),
     }
 }
@@ -74,4 +76,15 @@ fn byte_instruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     std.debug.print("{s:<16} {d:>4}\n", .{ name, slot });
 
     return offset + 2;
+}
+
+fn jump_instruction(name: []const u8, sign: usize, chunk: *Chunk, offset: usize) usize {
+    var jump: usize = @intCast(chunk.code.items[offset + 1]);
+    jump <<= @intCast(8);
+    jump |= @intCast(chunk.code.items[offset + 2]);
+
+    // `offset + 3` is the next instruction, skipping over the 2-byte jump operand.
+    std.debug.print("{s:<16} {d:>4} -> {d}\n", .{ name, offset, offset + 3 + sign * jump });
+
+    return offset + 3;
 }

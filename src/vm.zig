@@ -7,6 +7,7 @@ const debug = @import("debug.zig");
 const flags = @import("flags.zig");
 const Parser = @import("compiler.zig").Parser;
 const String = @import("object.zig").String;
+const utils = @import("utils.zig");
 
 pub const InterpretError = error{
     CompileError,
@@ -175,6 +176,22 @@ pub const VirtualMachine = struct {
                     value.print();
                     std.debug.print("\n", .{});
                 },
+                OpCode.Jump => {
+                    const offset: usize = self.read_short();
+                    self.ip += offset;
+                },
+                OpCode.JumpIfFalse => {
+                    const offset: usize = self.read_short();
+
+                    // Jump (moving the instruction pointer more than 1 step) if the
+                    // top value in the stack is falsey. Note that this top value
+                    // corresponds to the condition in `if (condition) { statement }`.
+                    // If `condition` is falsey, then we skip the statement, i.e. jump
+                    // over it.
+                    if (self.peek(0).is_falsey()) {
+                        self.ip += offset;
+                    }
+                },
                 OpCode.Return => {
                     return;
                 },
@@ -232,6 +249,18 @@ pub const VirtualMachine = struct {
 
     inline fn read_constant(self: *VirtualMachine) Value {
         return self.chunk.constants.items[self.read_byte()];
+    }
+
+    inline fn read_short(self: *VirtualMachine) usize {
+        // Skip over the jump operand (the 2 bytes indicating how much jump).
+        self.ip += 2;
+
+        // Recall in the compiler, `self.ip[-2]` encodes the 8 most significant bytes
+        // while `self.ip[-1]` the least. What we're doing here is to combine them
+        // into a u16. Note that we use pointer arithmetic to do the indexing.
+        const msb: usize = @intCast((self.ip - 2)[0]);
+        const lsb: usize = @intCast((self.ip - 1)[0]);
+        return msb << @intCast(8) | lsb;
     }
 
     inline fn read_string(self: *VirtualMachine) InterpretError![]const u8 {
