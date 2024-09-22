@@ -7,7 +7,6 @@ const debug = @import("debug.zig");
 const flags = @import("flags.zig");
 const Parser = @import("compiler.zig").Parser;
 const String = @import("object.zig").String;
-const utils = @import("utils.zig");
 
 pub const InterpretError = error{
     CompileError,
@@ -191,6 +190,11 @@ pub const VirtualMachine = struct {
                     if (self.peek(0).is_falsey()) {
                         self.ip += offset;
                     }
+                },
+                OpCode.Loop => {
+                    const offset: usize = self.read_short();
+                    // Jump backward to the start of the loop.
+                    self.ip -= offset;
                 },
                 OpCode.Return => {
                     return;

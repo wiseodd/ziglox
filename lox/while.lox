@@ -1,0 +1,10 @@
+var x = 0;
+var i = 0;
+
+while (i < 20) {
+  x = x + i;
+  i = i + 1;
+}
+
+print i;
+print x;

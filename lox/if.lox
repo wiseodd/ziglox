@@ -1,6 +1,6 @@
 var x = 10;
 
-if (x < 20) {
+if (false or x < 20) {
   print("If branch!");
 } else {
   print("Else branch!");

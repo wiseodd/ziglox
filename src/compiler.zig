@@ -111,7 +111,7 @@ pub const Parser = struct {
         .Identifier = ParseRule{ .prefix = variable, .infix = null, .precedence = Precedence.None },
         .String = ParseRule{ .prefix = string, .infix = null, .precedence = Precedence.None },
         .Number = ParseRule{ .prefix = number, .infix = null, .precedence = Precedence.None },
-        .And = ParseRule{},
+        .And = ParseRule{ .prefix = null, .infix = and_, .precedence = Precedence.And },
         .Class = ParseRule{},
         .Else = ParseRule{},
         .False = ParseRule{ .prefix = literal, .infix = null, .precedence = Precedence.None },
@@ -119,7 +119,7 @@ pub const Parser = struct {
         .Fun = ParseRule{},
         .If = ParseRule{},
         .Nil = ParseRule{ .prefix = literal, .infix = null, .precedence = Precedence.None },
-        .Or = ParseRule{},
+        .Or = ParseRule{ .prefix = null, .infix = or_, .precedence = Precedence.Or },
         .Print = ParseRule{},
         .Return = ParseRule{},
         .Super = ParseRule{},
@@ -315,6 +315,8 @@ pub const Parser = struct {
             self.print_statement();
         } else if (self.match(TokenType.If)) {
             self.if_statement();
+        } else if (self.match(TokenType.While)) {
+            self.while_statement();
         } else if (self.match(TokenType.LeftBrace)) {
             self.begin_scope();
             self.block();
@@ -328,6 +330,23 @@ pub const Parser = struct {
         self.expression();
         self.consume(TokenType.SemiColon, "Expect ';' after value.");
         self.emit_byte(@intFromEnum(OpCode.Print));
+    }
+
+    fn while_statement(self: *Parser) void {
+        const loop_start: usize = self.current_chunk().code.items.len;
+
+        self.consume(TokenType.LeftParen, "Expect '(' after 'while'.");
+        self.expression();
+        self.consume(TokenType.RightParen, "Expect ')' after condition.");
+
+        const exit_jump: usize = self.emit_jump(OpCode.JumpIfFalse);
+        self.emit_byte(@intFromEnum(OpCode.Pop));
+
+        self.statement();
+        self.emit_loop(loop_start);
+
+        self.patch_jump(exit_jump);
+        self.emit_byte(@intFromEnum(OpCode.Pop));
     }
 
     fn synchronize(self: *Parser) void {
@@ -370,6 +389,19 @@ pub const Parser = struct {
             return;
         };
         self.emit_constant(Value.number(val));
+    }
+
+    fn or_(self: *Parser, can_assign: bool) void {
+        _ = can_assign;
+
+        const else_jump: usize = self.emit_jump(OpCode.JumpIfFalse);
+        const end_jump: usize = self.emit_jump(OpCode.Jump);
+
+        self.patch_jump(else_jump);
+        self.emit_byte(@intFromEnum(OpCode.Pop));
+
+        self.parse_precedence(Precedence.Or);
+        self.patch_jump(end_jump);
     }
 
     fn string(self: *Parser, can_assign: bool) void {
@@ -600,6 +632,17 @@ pub const Parser = struct {
         self.emit_bytes(@intFromEnum(OpCode.DefineGlobal), global);
     }
 
+    fn and_(self: *Parser, can_assign: bool) void {
+        _ = can_assign;
+
+        const end_jump: usize = self.emit_jump(OpCode.JumpIfFalse);
+
+        self.emit_byte(@intFromEnum(OpCode.Pop));
+        self.parse_precedence(Precedence.And);
+
+        self.patch_jump(end_jump);
+    }
+
     fn resolve_local(self: *Parser, compiler: *Compiler, name: *Token) ?usize {
         if (compiler.local_count == 0) {
             return null;
@@ -633,6 +676,20 @@ pub const Parser = struct {
     fn emit_bytes(self: *Parser, byte1: u8, byte2: u8) void {
         self.emit_byte(byte1);
         self.emit_byte(byte2);
+    }
+
+    fn emit_loop(self: *Parser, loop_start: usize) void {
+        self.emit_byte(@intFromEnum(OpCode.Loop));
+
+        // Jump backward!
+        const offset: usize = self.current_chunk().code.items.len - loop_start + 2;
+
+        if (offset > std.math.maxInt(u16)) {
+            self.err("Loop body too large.");
+        }
+
+        self.emit_byte(@intCast((offset >> 8) & 0xff));
+        self.emit_byte(@intCast(offset & 0xff));
     }
 
     fn emit_jump(self: *Parser, instruction: OpCode) usize {
