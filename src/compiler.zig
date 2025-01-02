@@ -248,6 +248,65 @@ pub const Parser = struct {
         self.emit_byte(@intFromEnum(OpCode.Pop));
     }
 
+    /// Syntax: `for(var i = 0; i <= 10; i += 1)` or `for(;;)`
+    /// The first clause is the "initializer clause" then the "condition" and
+    /// "increment" clauses respectively.
+    fn for_statement(self: *Parser) void {
+        self.begin_scope();
+
+        self.consume(TokenType.LeftParen, "Expect '(' after 'for'.");
+
+        // Initializer clause
+        if (self.match(TokenType.SemiColon)) {
+            // No initializer
+        } else if (self.match(TokenType.Var)) {
+            self.var_declaration();
+        } else {
+            self.expression_statement();
+        }
+
+        var loop_start: usize = self.current_chunk().code.items.len;
+        var exit_jump: ?usize = null;
+
+        // Condition clause
+        if (!self.match(TokenType.SemiColon)) {
+            self.expression();
+            self.consume(TokenType.SemiColon, "Expect ';' after loop condition.");
+
+            // Mark out of the loop once the condition is false
+            exit_jump = self.emit_jump(OpCode.JumpIfFalse);
+
+            // The loop condition is stored in the stack
+            self.emit_byte(@intFromEnum(OpCode.Pop));
+        }
+
+        // Increment clause
+        if (!self.match(TokenType.RightParen)) {
+            const body_jump: usize = self.emit_jump(OpCode.Jump);
+            const increment_start: usize = self.current_chunk().code.items.len;
+
+            self.expression();
+            self.emit_byte(@intFromEnum(OpCode.Pop));
+            self.consume(TokenType.RightParen, "Expect ')' after 'for' clauses.");
+
+            self.emit_loop(loop_start);
+            loop_start = increment_start;
+            self.patch_jump(body_jump);
+        }
+
+        self.statement();
+        self.emit_loop(loop_start);
+
+        // Only done if there is a condition clause.
+        // Otherwise `exit_jump` is always `null`.
+        if (exit_jump) |offset| {
+            self.patch_jump(offset);
+            self.emit_byte(@intFromEnum(OpCode.Pop));
+        }
+
+        self.end_scope();
+    }
+
     fn if_statement(self: *Parser) void {
         // Parse the `if` condition.
         self.consume(TokenType.LeftParen, "Expect '(' after 'if'.");
@@ -313,6 +372,8 @@ pub const Parser = struct {
     fn statement(self: *Parser) void {
         if (self.match(TokenType.Print)) {
             self.print_statement();
+        } else if (self.match(TokenType.For)) {
+            self.for_statement();
         } else if (self.match(TokenType.If)) {
             self.if_statement();
         } else if (self.match(TokenType.While)) {
