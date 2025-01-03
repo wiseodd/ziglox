@@ -2,6 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const Value = @import("value.zig").Value;
+const Chunk = @import("chunk.zig").Chunk;
 
 pub const ObjType = enum {
     String,
@@ -19,6 +20,14 @@ pub const Obj = struct {
     pub inline fn is_obj_type(self: *Obj, obj_type: ObjType) bool {
         return self.obj_type == obj_type;
     }
+};
+
+pub const Function = struct {
+    allocator: Allocator,
+    obj: Obj,
+    arity: usize,
+    chunk: Chunk,
+    name: String,
 };
 
 pub const String = struct {

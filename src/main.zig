@@ -1,9 +1,13 @@
 const std = @import("std");
 const debug = @import("debug.zig");
+const flags = @import("flags.zig");
 const VirtualMachine = @import("vm.zig").VirtualMachine;
 const InterpretError = @import("vm.zig").InterpretError;
+const App = @import("yazap").App;
+const Arg = @import("yazap").Arg;
 
 pub fn main() !void {
+    // Initialize memory allocator
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
@@ -13,15 +17,23 @@ pub fn main() !void {
     defer vm.deinit();
 
     // Command-line arguments
-    const args = try std.process.argsAlloc(allocator);
+    var app = App.init(allocator, "ziglox", "Lox bytecode compiler in Zig.");
+    defer app.deinit();
 
-    // Element 0 is always the program name
-    if (args.len == 1) {
-        try repl(&vm, allocator);
-    } else if (args.len == 2) {
-        try run_file(args[1], &vm, allocator);
+    var myapp = app.rootCommand();
+    try myapp.addArg(Arg.positional("FILE", null, null));
+    try myapp.addArg(Arg.booleanOption("debug", 'd', null));
+    const args = try app.parseProcess();
+
+    if (args.containsArg("debug")) {
+        flags.DEBUG_PRINT_CODE = true;
+        flags.DEBUG_TRACE_EXECUTION = true;
+    }
+
+    if (args.getSingleValue("FILE")) |f| {
+        try run_file(f, &vm, allocator);
     } else {
-        std.log.err("Usage: ziglox [path]\n", .{});
+        try repl(&vm, allocator);
     }
 
     std.process.exit(0);
