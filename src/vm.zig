@@ -40,8 +40,8 @@ pub const VirtualMachine = struct {
     }
 
     pub fn interpret(self: *VirtualMachine, source: []const u8) InterpretError!void {
-        var parser = Parser.init(self.allocator, source, &self.chunk, &self.strings);
-        try parser.compile();
+        var parser = try Parser.init(self.allocator, source, &self.chunk, &self.strings);
+        _ = try parser.compile();
 
         // Initialize the instruction pointer to the start of the chunk's bytecode
         self.ip = self.chunk.code.items.ptr;

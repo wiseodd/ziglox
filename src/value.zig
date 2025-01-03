@@ -3,6 +3,7 @@ const testing = std.testing;
 const Obj = @import("object.zig").Obj;
 const ObjType = @import("object.zig").ObjType;
 const String = @import("object.zig").String;
+const Function = @import("object.zig").Function;
 
 const ValueError = error{
     CastError,
@@ -12,15 +13,15 @@ pub const Value = union(enum) {
     Bool: bool,
     Number: f64,
     String: String,
+    Function: Function,
     Nil: void,
 
     pub fn print(self: Value) void {
         switch (self) {
             .Bool => |val| std.debug.print("{}", .{val}),
             .Number => |val| std.debug.print("{d}", .{val}),
-            .String => |val| {
-                std.debug.print("{s}", .{val.chars});
-            },
+            .Function => |val| val.print(),
+            .String => |val| val.print(),
             .Nil => std.debug.print("nil", .{}),
         }
     }
@@ -38,6 +39,17 @@ pub const Value = union(enum) {
         return switch (self) {
             .Bool => self.Bool == other.Bool,
             .Number => self.Number == other.Number,
+            .Function => {
+                if (self.Function.name) |name1| {
+                    if (other.Function.name) |name2| {
+                        return name1.eq(&name2) and self.Function.arity == other.Function.arity;
+                    } else {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            },
             .String => std.mem.eql(u8, self.String.chars, other.String.chars),
             .Nil => true,
         };
@@ -58,6 +70,10 @@ pub const Value = union(enum) {
 
     pub inline fn number(value: f64) Value {
         return Value{ .Number = value };
+    }
+
+    pub inline fn function(allocator: std.mem.Allocator) !Value {
+        return Value{ .Function = try Function.init(allocator) };
     }
 
     pub inline fn string(
@@ -82,6 +98,13 @@ pub const Value = union(enum) {
     pub inline fn is_number(self: Value) bool {
         return switch (self) {
             .Number => true,
+            else => false,
+        };
+    }
+
+    pub inline fn is_function(self: Value) bool {
+        return switch (self) {
+            .Function => true,
             else => false,
         };
     }

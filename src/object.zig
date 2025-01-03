@@ -5,7 +5,13 @@ const Value = @import("value.zig").Value;
 const Chunk = @import("chunk.zig").Chunk;
 
 pub const ObjType = enum {
+    Function,
     String,
+};
+
+pub const FunctionType = enum {
+    Function,
+    Script,
 };
 
 pub const Obj = struct {
@@ -27,7 +33,30 @@ pub const Function = struct {
     obj: Obj,
     arity: usize,
     chunk: Chunk,
-    name: String,
+    name: ?String,
+
+    pub fn init(allocator: Allocator) !Function {
+        return Function{
+            .allocator = allocator,
+            .obj = Obj.init(ObjType.Function),
+            .arity = 0,
+            .chunk = Chunk.init(allocator),
+            .name = null,
+        };
+    }
+
+    pub fn deinit(self: Function) void {
+        self.name.deinit();
+        self.chunk.deinit();
+    }
+
+    pub fn print(self: *const Function) void {
+        if (self.name) |name| {
+            std.debug.print("<fn {s}>", .{name.chars});
+        } else {
+            std.debug.print("<script>", .{});
+        }
+    }
 };
 
 pub const String = struct {
@@ -60,8 +89,12 @@ pub const String = struct {
         self.allocator.free(self.chars);
     }
 
-    pub fn print(self: *String) void {
+    pub fn print(self: *const String) void {
         std.debug.print("{s}", .{self.chars});
+    }
+
+    pub fn eq(self: *const String, other: *const String) bool {
+        return std.mem.eql(u8, self.chars, other.chars);
     }
 };
 

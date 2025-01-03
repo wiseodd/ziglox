@@ -10,6 +10,8 @@ const OpCode = @import("chunk.zig").OpCode;
 const Value = @import("value.zig").Value;
 const Obj = @import("object.zig").Obj;
 const ObjType = @import("object.zig").ObjType;
+const Function = @import("object.zig").Function;
+const FunctionType = @import("object.zig").FunctionType;
 const String = @import("object.zig").String;
 const FLAGS = @import("flags.zig");
 const debug = @import("debug.zig");
@@ -42,12 +44,18 @@ const Local = struct {
 
 // Storage for local variables
 const Compiler = struct {
+    function: *Function,
+    func_type: FunctionType,
     locals: [U8_COUNT]Local,
     local_count: usize,
     scope_depth: usize,
 
-    pub fn init() Compiler {
+    pub fn init(allocator: std.mem.Allocator, func_type: FunctionType) !Compiler {
+        var function = try Function.init(allocator);
+
         return Compiler{
+            .function = &function,
+            .func_type = func_type,
             .locals = undefined,
             .local_count = 0,
             .scope_depth = 0,
@@ -81,6 +89,7 @@ pub const Parser = struct {
     strings: *std.StringHashMap(Value),
     compiler: Compiler,
     current_compiler: *Compiler = undefined,
+    local: *Local = undefined,
     current: Token = undefined,
     previous: Token = undefined,
     had_error: bool = false,
@@ -136,29 +145,37 @@ pub const Parser = struct {
         source: []const u8,
         chunk: *Chunk,
         strings: *std.StringHashMap(Value),
-    ) Parser {
+    ) !Parser {
         var parser = Parser{
             .allocator = allocator,
             .source = source,
             .scanner = Scanner.init(source),
-            .compiler = Compiler.init(),
+            .compiler = try Compiler.init(allocator, FunctionType.Script),
             .compiling_chunk = chunk,
             .strings = strings,
         };
+
         parser.current_compiler = &parser.compiler;
+
+        parser.local = &parser.current_compiler.locals[parser.current_compiler.local_count + 1];
+        parser.current_compiler.local_count += 1;
+        parser.local.maybe_depth = 0;
+        parser.local.name.start = "";
+        parser.local.name.length = 0;
+
         return parser;
     }
 
-    pub fn compile(self: *Parser) InterpretError!void {
+    pub fn compile(self: *Parser) InterpretError!*Function {
         self.advance();
 
         while (!self.match(TokenType.EOF)) {
             self.declaration();
         }
 
-        self.end_compiler();
+        const function = self.end_compiler();
 
-        if (self.had_error) return InterpretError.CompileError;
+        return if (self.had_error) InterpretError.CompileError else function;
     }
 
     fn advance(self: *Parser) void {
@@ -198,14 +215,17 @@ pub const Parser = struct {
         return self.current.token_type == token_type;
     }
 
-    fn end_compiler(self: *Parser) void {
+    fn end_compiler(self: *Parser) *Function {
         self.emit_return();
+        const function = self.current_compiler.function;
 
         if (FLAGS.DEBUG_PRINT_CODE) {
             if (!self.had_error) {
-                debug.disasemble_chunk(self.current_chunk(), "code");
+                debug.disasemble_chunk(self.current_chunk(), if (function.name) |name| name.chars else "<script>");
             }
         }
+
+        return function;
     }
 
     fn begin_scope(self: *Parser) void {
@@ -807,7 +827,7 @@ pub const Parser = struct {
     }
 
     fn current_chunk(self: *Parser) *Chunk {
-        return self.compiling_chunk;
+        return &self.current_compiler.function.chunk;
     }
 
     fn err_at_current(self: *Parser, message: []const u8) void {
