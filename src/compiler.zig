@@ -85,7 +85,6 @@ pub const Parser = struct {
     allocator: std.mem.Allocator,
     source: []const u8,
     scanner: Scanner,
-    compiling_chunk: *Chunk,
     strings: *std.StringHashMap(Value),
     compiler: Compiler,
     current_compiler: *Compiler = undefined,
@@ -143,7 +142,6 @@ pub const Parser = struct {
     pub fn init(
         allocator: std.mem.Allocator,
         source: []const u8,
-        chunk: *Chunk,
         strings: *std.StringHashMap(Value),
     ) !Parser {
         var parser = Parser{
@@ -151,13 +149,12 @@ pub const Parser = struct {
             .source = source,
             .scanner = Scanner.init(source),
             .compiler = try Compiler.init(allocator, FunctionType.Script),
-            .compiling_chunk = chunk,
             .strings = strings,
         };
 
         parser.current_compiler = &parser.compiler;
 
-        parser.local = &parser.current_compiler.locals[parser.current_compiler.local_count + 1];
+        parser.local = &parser.current_compiler.locals[parser.current_compiler.local_count];
         parser.current_compiler.local_count += 1;
         parser.local.maybe_depth = 0;
         parser.local.name.start = "";

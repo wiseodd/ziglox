@@ -13,7 +13,7 @@ pub const Value = union(enum) {
     Bool: bool,
     Number: f64,
     String: String,
-    Function: Function,
+    Function: *Function,
     Nil: void,
 
     pub fn print(self: Value) void {
@@ -72,8 +72,8 @@ pub const Value = union(enum) {
         return Value{ .Number = value };
     }
 
-    pub inline fn function(allocator: std.mem.Allocator) !Value {
-        return Value{ .Function = try Function.init(allocator) };
+    pub inline fn function(value: *Function) Value {
+        return Value{ .Function = value };
     }
 
     pub inline fn string(

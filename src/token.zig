@@ -49,10 +49,10 @@ pub const TokenType = enum {
 };
 
 pub const Token = struct {
-    token_type: TokenType,
-    start: [*]const u8,
-    length: usize,
-    line: usize,
+    token_type: TokenType = undefined,
+    start: [*]const u8 = undefined,
+    length: usize = undefined,
+    line: usize = undefined,
 
     pub fn init(scanner: *Scanner, token_type: TokenType) Token {
         return Token{

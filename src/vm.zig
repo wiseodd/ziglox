@@ -6,17 +6,34 @@ const Value = @import("value.zig").Value;
 const debug = @import("debug.zig");
 const flags = @import("flags.zig");
 const Parser = @import("compiler.zig").Parser;
+const Function = @import("object.zig").Function;
 const String = @import("object.zig").String;
+
+const FRAMES_MAX: usize = 64;
+const STACK_MAX: usize = FRAMES_MAX * std.math.maxInt(u8);
 
 pub const InterpretError = error{
     CompileError,
     RuntimeError,
 };
 
+pub const CallFrame = struct {
+    function: *Function,
+    ip: [*]u8,
+    slots: [*]Value,
+
+    pub fn init(function: *Function, ip: [*]u8, slots: [*]Value) CallFrame {
+        return CallFrame{
+            .function = function,
+            .ip = ip,
+            .slots = slots,
+        };
+    }
+};
+
 pub const VirtualMachine = struct {
     allocator: std.mem.Allocator,
-    chunk: Chunk,
-    ip: [*]u8,
+    frames: std.ArrayList(CallFrame),
     stack: std.ArrayList(Value),
     strings: std.StringHashMap(Value),
     globals: std.StringHashMap(Value),
@@ -24,8 +41,7 @@ pub const VirtualMachine = struct {
     pub fn init(allocator: std.mem.Allocator) VirtualMachine {
         return VirtualMachine{
             .allocator = allocator,
-            .chunk = Chunk.init(allocator),
-            .ip = undefined,
+            .frames = std.ArrayList(CallFrame).init(allocator),
             .stack = std.ArrayList(Value).init(allocator),
             .strings = std.StringHashMap(Value).init(allocator),
             .globals = std.StringHashMap(Value).init(allocator),
@@ -33,24 +49,32 @@ pub const VirtualMachine = struct {
     }
 
     pub fn deinit(self: *VirtualMachine) void {
-        self.chunk.deinit();
+        self.frames.deinit();
         self.stack.deinit();
         self.strings.deinit();
         self.globals.deinit();
     }
 
     pub fn interpret(self: *VirtualMachine, source: []const u8) InterpretError!void {
-        var parser = try Parser.init(self.allocator, source, &self.chunk, &self.strings);
-        _ = try parser.compile();
+        var parser = try Parser.init(self.allocator, source, &self.strings);
+        const function: *Function = try parser.compile();
 
-        // Initialize the instruction pointer to the start of the chunk's bytecode
-        self.ip = self.chunk.code.items.ptr;
+        // Put the top-level function into the call frame
+        try self.push(Value.function(function));
+        const frame = CallFrame.init(
+            function,
+            function.chunk.code.items.ptr,
+            self.stack.items.ptr,
+        );
+        self.frames.append(frame) catch {
+            return InterpretError.RuntimeError;
+        };
 
         try self.run();
     }
 
     fn run(self: *VirtualMachine) InterpretError!void {
-        if (self.chunk.code.items.len == 0) return;
+        const frame: *CallFrame = @constCast(&self.frames.getLast());
 
         // Note that self.read_byte() advances the pointer
         while (true) {
@@ -66,15 +90,15 @@ pub const VirtualMachine = struct {
                 // @intFromPtr converts a pointer to its usize address.
                 // Since arrays are contiguous, we can compute the distance from the
                 // first element.
-                const offset: usize = @intFromPtr(self.ip) - @intFromPtr(self.chunk.code.items.ptr);
-                _ = debug.disassemble_instruction(&self.chunk, offset);
+                const offset: usize = @intFromPtr(frame.ip) - @intFromPtr(frame.function.chunk.code.items.ptr);
+                _ = debug.disassemble_instruction(&frame.function.chunk, offset);
             }
 
-            const instruction: OpCode = @enumFromInt(self.read_byte());
+            const instruction: OpCode = @enumFromInt(self.read_byte(frame));
 
             switch (instruction) {
                 OpCode.Constant => {
-                    const constant: Value = self.read_constant();
+                    const constant: Value = self.read_constant(frame);
                     try self.push(constant);
                 },
                 OpCode.Nil => try self.push(Value.nil()),
@@ -87,15 +111,15 @@ pub const VirtualMachine = struct {
                 },
                 OpCode.Pop => _ = try self.pop(),
                 OpCode.GetLocal => {
-                    const slot: usize = @intCast(self.read_byte());
-                    try self.push(self.stack.items[slot]);
+                    const slot: usize = @intCast(self.read_byte(frame));
+                    try self.push(frame.slots[slot]);
                 },
                 OpCode.SetLocal => {
-                    const slot: usize = @intCast(self.read_byte());
-                    self.stack.items[slot] = self.peek(0);
+                    const slot: usize = @intCast(self.read_byte(frame));
+                    frame.slots[slot] = self.peek(0);
                 },
                 OpCode.GetGlobal => {
-                    const name: []const u8 = try self.read_string();
+                    const name: []const u8 = try self.read_string(frame);
 
                     if (self.globals.get(name)) |value| {
                         try self.push(value);
@@ -105,14 +129,14 @@ pub const VirtualMachine = struct {
                     }
                 },
                 OpCode.DefineGlobal => {
-                    const name: []const u8 = try self.read_string();
+                    const name: []const u8 = try self.read_string(frame);
                     self.globals.put(name, self.peek(0)) catch {
                         return InterpretError.RuntimeError;
                     };
                     _ = try self.pop();
                 },
                 OpCode.SetGlobal => {
-                    const name: []const u8 = try self.read_string();
+                    const name: []const u8 = try self.read_string(frame);
 
                     if (!self.globals.contains(name)) {
                         self.runtime_error("Undefined variable '{s}'", .{name});
@@ -176,11 +200,11 @@ pub const VirtualMachine = struct {
                     std.debug.print("\n", .{});
                 },
                 OpCode.Jump => {
-                    const offset: usize = self.read_short();
-                    self.ip += offset;
+                    const offset: usize = self.read_short(frame);
+                    frame.ip += offset;
                 },
                 OpCode.JumpIfFalse => {
-                    const offset: usize = self.read_short();
+                    const offset: usize = self.read_short(frame);
 
                     // Jump (moving the instruction pointer more than 1 step) if the
                     // top value in the stack is falsey. Note that this top value
@@ -188,13 +212,13 @@ pub const VirtualMachine = struct {
                     // If `condition` is falsey, then we skip the statement, i.e. jump
                     // over it.
                     if (self.peek(0).is_falsey()) {
-                        self.ip += offset;
+                        frame.ip += offset;
                     }
                 },
                 OpCode.Loop => {
-                    const offset: usize = self.read_short();
+                    const offset: usize = self.read_short(frame);
                     // Jump backward to the start of the loop.
-                    self.ip -= offset;
+                    frame.ip -= offset;
                 },
                 OpCode.Return => {
                     return;
@@ -225,11 +249,13 @@ pub const VirtualMachine = struct {
         std.debug.print(format, args);
         std.debug.print("\n", .{});
 
+        const frame: *CallFrame = @constCast(&self.frames.getLast());
+
         // Distance between the current pointer to the beginning.
         // Note that there's `- 1` there because `self.ip` has been advanced by one
         // when an instruction is read via `self.read_byte()`.
-        const instruction: usize = @intFromPtr(self.ip) - @intFromPtr(self.chunk.code.items.ptr) - 1;
-        const line: usize = self.chunk.lines.items[instruction];
+        const instruction: usize = @intFromPtr(frame.ip) - @intFromPtr(frame.function.chunk.code.items.ptr) - 1;
+        const line: usize = frame.function.chunk.lines.items[instruction];
         std.debug.print("[Line {}] in script\n", .{line});
 
         self.reset_stack();
@@ -241,34 +267,38 @@ pub const VirtualMachine = struct {
     }
 
     // Inline function to emulate C macro
-    inline fn read_byte(self: *VirtualMachine) u8 {
-        // self.ip is a many-item pointer.
+    inline fn read_byte(self: *VirtualMachine, frame: *CallFrame) u8 {
+        _ = self;
+
+        // ip is a many-item pointer.
         // The first element points to start of the slice.
-        const value: u8 = self.ip[0];
-        // Pointer arithmetic below. We advance self.ip to the pointer of the next
+        const value: u8 = frame.ip[0];
+        // Pointer arithmetic below. We advance the ip to the pointer of the next
         // element in the slice.
-        self.ip += 1;
+        frame.ip += 1;
         return value;
     }
 
-    inline fn read_constant(self: *VirtualMachine) Value {
-        return self.chunk.constants.items[self.read_byte()];
+    inline fn read_constant(self: *VirtualMachine, frame: *CallFrame) Value {
+        return frame.function.chunk.constants.items[self.read_byte(frame)];
     }
 
-    inline fn read_short(self: *VirtualMachine) usize {
+    inline fn read_short(self: *VirtualMachine, frame: *CallFrame) usize {
+        _ = self;
+
         // Skip over the jump operand (the 2 bytes indicating how much jump).
-        self.ip += 2;
+        frame.ip += 2;
 
         // Recall in the compiler, `self.ip[-2]` encodes the 8 most significant bytes
         // while `self.ip[-1]` the least. What we're doing here is to combine them
         // into a u16. Note that we use pointer arithmetic to do the indexing.
-        const msb: usize = @intCast((self.ip - 2)[0]);
-        const lsb: usize = @intCast((self.ip - 1)[0]);
+        const msb: usize = @intCast((frame.ip - 2)[0]);
+        const lsb: usize = @intCast((frame.ip - 1)[0]);
         return msb << @intCast(8) | lsb;
     }
 
-    inline fn read_string(self: *VirtualMachine) InterpretError![]const u8 {
-        switch (self.read_constant()) {
+    inline fn read_string(self: *VirtualMachine, frame: *CallFrame) InterpretError![]const u8 {
+        switch (self.read_constant(frame)) {
             .String => |val| return val.chars,
             else => return InterpretError.RuntimeError,
         }
