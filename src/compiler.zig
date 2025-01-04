@@ -44,18 +44,24 @@ const Local = struct {
 
 // Storage for local variables
 const Compiler = struct {
+    enclosing: *Compiler,
     function: *Function,
-    func_type: FunctionType,
+    fun_type: FunctionType,
     locals: [U8_COUNT]Local,
     local_count: usize,
     scope_depth: usize,
 
-    pub fn init(allocator: std.mem.Allocator, func_type: FunctionType) !Compiler {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        fun_type: FunctionType,
+        enclosing: *Compiler,
+    ) !Compiler {
         var function = try Function.init(allocator);
 
         return Compiler{
+            .enclosing = enclosing,
             .function = &function,
-            .func_type = func_type,
+            .fun_type = fun_type,
             .locals = undefined,
             .local_count = 0,
             .scope_depth = 0,
@@ -148,7 +154,7 @@ pub const Parser = struct {
             .allocator = allocator,
             .source = source,
             .scanner = Scanner.init(source),
-            .compiler = try Compiler.init(allocator, FunctionType.Script),
+            .compiler = try Compiler.init(allocator, FunctionType.Script, undefined),
             .strings = strings,
         };
 
@@ -222,6 +228,9 @@ pub const Parser = struct {
             }
         }
 
+        // Set the current compiler to the previous one in the stack
+        self.current_compiler = self.current_compiler.enclosing;
+
         return function;
     }
 
@@ -256,6 +265,62 @@ pub const Parser = struct {
         }
 
         self.consume(TokenType.RightBrace, "Expect '}' after block.");
+    }
+
+    fn fun(self: *Parser, fun_type: FunctionType) void {
+        var compiler = Compiler.init(self.allocator, fun_type, self.current_compiler) catch {
+            self.err("Error allocating compiler.");
+            return;
+        };
+        self.current_compiler = &compiler;
+
+        if (fun_type != .Script) {
+            self.current_compiler.function.name = String.init(
+                self.allocator,
+                self.previous.start[0..self.previous.length],
+                self.strings,
+            ) catch {
+                self.err("Error allocating string.");
+                return;
+            };
+        }
+
+        self.begin_scope();
+
+        self.consume(TokenType.LeftParen, "Expect '(' after function name.");
+
+        if (!self.check(TokenType.RightParen)) {
+            // Parse each parameter
+            while (true) {
+                self.current_compiler.function.arity += 1;
+
+                if (self.current_compiler.function.arity > 255) {
+                    self.err_at_current("Can't have more than 255 parameters.");
+                }
+
+                const constant: u8 = self.parse_variable("Expect parameter name.");
+                self.define_variable(constant);
+
+                if (!self.match(TokenType.Comma)) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType.RightParen, "Expect ')' after parameters.");
+        self.consume(TokenType.LeftBrace, "Expect '{' before function body.");
+
+        self.block();
+
+        const function = self.end_compiler();
+        self.emit_bytes(@intFromEnum(OpCode.Constant), self.make_constant(Value.function(function)));
+    }
+
+    fn fun_declaration(self: *Parser) void {
+        const global: u8 = self.parse_variable("Expect function name.");
+        self.mark_initialized();
+        self.fun(FunctionType.Function);
+        self.define_variable(global);
     }
 
     fn expression_statement(self: *Parser) void {
@@ -375,7 +440,9 @@ pub const Parser = struct {
     }
 
     fn declaration(self: *Parser) void {
-        if (self.match(TokenType.Var)) {
+        if (self.match(TokenType.Fun)) {
+            self.fun_declaration();
+        } else if (self.match(TokenType.Var)) {
             self.var_declaration();
         } else {
             self.statement();
@@ -640,6 +707,9 @@ pub const Parser = struct {
     }
 
     fn mark_initialized(self: *Parser) void {
+        // We only initialize in the local scope. Scope depth 0 => global scope.
+        if (self.current_compiler.scope_depth == 0) return;
+
         // Make variables in the scopes above available for the current scope.
         const curr: *Compiler = self.current_compiler;
         curr.locals[curr.local_count - 1].maybe_depth = curr.scope_depth;
