@@ -19,17 +19,9 @@ pub const InterpretError = error{
 };
 
 pub const CallFrame = struct {
-    function: *Function,
-    ip: [*]u8,
-    slots: [*]Value,
-
-    pub fn init(function: *Function, ip: [*]u8, slots: [*]Value) CallFrame {
-        return CallFrame{
-            .function = function,
-            .ip = ip,
-            .slots = slots,
-        };
-    }
+    function: *Function = undefined,
+    ip: [*]u8 = undefined,
+    slots: [*]Value = undefined,
 };
 
 pub const VirtualMachine = struct {
@@ -73,11 +65,6 @@ pub const VirtualMachine = struct {
         // Put the top-level function into the call frame
         try self.push(Value.obj(function.as_obj()));
 
-        for (function.chunk.constants.items) |v| {
-            v.print();
-            std.debug.print("\n", .{});
-        }
-
         // Call the top-level frame
         try self.call(function, 0);
 
@@ -85,6 +72,10 @@ pub const VirtualMachine = struct {
     }
 
     fn run(self: *VirtualMachine) InterpretError!void {
+        if (flags.DEBUG_TRACE_EXECUTION) {
+            std.debug.print("\n", .{});
+        }
+
         var frame: *CallFrame = &self.frames[self.frame_count - 1];
 
         // Note that self.read_byte() advances the pointer
@@ -224,11 +215,7 @@ pub const VirtualMachine = struct {
                     }
                 },
 
-                OpCode.Print => {
-                    const value: Value = try self.pop();
-                    value.print();
-                    std.debug.print("\n", .{});
-                },
+                OpCode.Print => (try self.pop()).println(),
 
                 OpCode.Jump => {
                     const offset: usize = self.read_short(frame);
@@ -311,14 +298,14 @@ pub const VirtualMachine = struct {
         frame.function = function;
         frame.ip = function.chunk.code.items.ptr;
         // This points to the last position in the stack before the current frame
-        frame.slots = self.stack_top - arg_count;
+        frame.slots = self.stack_top - arg_count - 1;
 
         self.frame_count += 1;
     }
 
     fn call_value(self: *VirtualMachine, callee: Value, arg_count: usize) InterpretError!void {
         if (callee.is_obj()) {
-            try self.call(callee.Obj.as(Function), arg_count);
+            return try self.call(callee.Obj.as(Function), arg_count);
         }
 
         self.runtime_error("Can only call functions and classes.", .{});
@@ -337,7 +324,7 @@ pub const VirtualMachine = struct {
 
             const frame: CallFrame = self.frames[i];
             const function = frame.function;
-            const instruction: usize = @intFromPtr(frame.ip) - @intFromPtr(function.chunk.code.items.ptr) - 1;
+            const instruction: usize = @intFromPtr(frame.ip) - @intFromPtr(function.chunk.code.items.ptr);
             std.debug.print("[line {}] in ", .{function.chunk.lines.items[instruction]});
 
             if (function.name) |name| {

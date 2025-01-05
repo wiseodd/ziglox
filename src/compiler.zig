@@ -51,12 +51,17 @@ const Compiler = struct {
     local_count: usize,
     scope_depth: usize,
 
+    /// The reason we do `ptr = allocator.create(T); ptr.* = ...` is so that
+    /// the newly initialized Compiler object lives in the heap. Otherwise, we will
+    /// have an undefined behavior (use-after-free).
     pub fn init(
         vm: *VirtualMachine,
         fun_type: FunctionType,
         enclosing: *Compiler,
-    ) !Compiler {
-        return Compiler{
+    ) !*Compiler {
+        const ptr = try vm.allocator.create(Compiler);
+
+        ptr.* = Compiler{
             .enclosing = enclosing,
             .function = try Function.init(vm),
             .fun_type = fun_type,
@@ -64,6 +69,8 @@ const Compiler = struct {
             .local_count = 0,
             .scope_depth = 0,
         };
+
+        return ptr;
     }
 
     pub fn deinit(self: *Compiler) void {
@@ -153,7 +160,7 @@ pub const Parser = struct {
             .vm = vm,
             .source = source,
             .scanner = Scanner.init(source),
-            .current_compiler = @constCast(&(try Compiler.init(vm, .Script, undefined))),
+            .current_compiler = try Compiler.init(vm, .Script, undefined),
         };
 
         var local = &parser.current_compiler.locals[0];
@@ -268,11 +275,10 @@ pub const Parser = struct {
     }
 
     fn fun(self: *Parser, fun_type: FunctionType) void {
-        var compiler = Compiler.init(self.vm, fun_type, self.current_compiler) catch {
+        self.current_compiler = Compiler.init(self.vm, fun_type, self.current_compiler) catch {
             self.err("Error allocating compiler.");
             return;
         };
-        self.current_compiler = &compiler;
 
         if (fun_type != .Script) {
             self.current_compiler.function.name = String.init(
@@ -722,17 +728,12 @@ pub const Parser = struct {
 
         // Make variables in the scopes above available for the current scope.
         const curr = self.current_compiler;
-
-        curr.function.println();
-        std.debug.print("{}\n", .{self.current_compiler.scope_depth});
-
         curr.locals[curr.local_count - 1].maybe_depth = curr.scope_depth;
     }
 
     fn identifier_constant(self: *Parser, name: *Token) u8 {
         const obj_str = String.init(name.start[0..name.length], self.vm) catch {
             self.err("Unable to initialize variable name.");
-            // TODO: Handle allocation error.
             return 0;
         };
 
@@ -756,8 +757,10 @@ pub const Parser = struct {
 
                 const local: *Local = &self.current_compiler.locals[i];
 
-                if (local.maybe_depth.? != -1 and local.maybe_depth.? < self.current_compiler.scope_depth) {
-                    break;
+                if (local.maybe_depth) |depth| {
+                    if (depth < self.current_compiler.scope_depth) {
+                        break;
+                    }
                 }
 
                 if (identifier_equals(name, &local.name)) {
@@ -784,7 +787,6 @@ pub const Parser = struct {
 
     fn define_variable(self: *Parser, global: u8) void {
         if (self.current_compiler.scope_depth > 0) {
-            // Mark variables in the outer scope as initialized.
             self.mark_initialized();
             return;
         }
