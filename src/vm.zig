@@ -63,10 +63,15 @@ pub const VirtualMachine = struct {
 
     pub fn interpret(self: *VirtualMachine, source: []const u8) InterpretError!void {
         var parser = try Parser.init(self.allocator, source, &self.strings);
-        const function: *Function = try parser.compile();
+        const function = try parser.compile();
 
         // Put the top-level function into the call frame
         try self.push(Value.function(function));
+
+        for (function.chunk.constants.items) |v| {
+            v.print();
+            std.debug.print("\n", .{});
+        }
 
         // Call the top-level frame
         try self.call(function, 0);

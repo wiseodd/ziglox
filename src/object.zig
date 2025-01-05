@@ -60,6 +60,11 @@ pub const Function = struct {
             std.debug.print("<script>", .{});
         }
     }
+
+    pub fn println(self: *const Function) void {
+        self.print();
+        std.debug.print("\n", .{});
+    }
 };
 
 pub const String = struct {
@@ -94,6 +99,11 @@ pub const String = struct {
 
     pub fn print(self: *const String) void {
         std.debug.print("{s}", .{self.chars});
+    }
+
+    pub fn println(self: *const Function) void {
+        self.print();
+        std.debug.print("\n", .{});
     }
 
     pub fn eq(self: *const String, other: *const String) bool {

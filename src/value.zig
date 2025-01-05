@@ -26,6 +26,11 @@ pub const Value = union(enum) {
         }
     }
 
+    pub fn println(self: Value) void {
+        self.print();
+        std.debug.print("\n", .{});
+    }
+
     pub fn equals(self: Value, other: Value) bool {
         const all_bools = self.is_boolean() and other.is_boolean();
         const all_nums = self.is_number() and other.is_number();
@@ -73,6 +78,7 @@ pub const Value = union(enum) {
     }
 
     pub inline fn function(value: *Function) Value {
+        std.debug.print("Val {}\n", .{@intFromPtr(value)});
         return Value{ .Function = value };
     }
 

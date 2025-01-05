@@ -47,8 +47,7 @@ const Compiler = struct {
     enclosing: *Compiler,
     function: *Function,
     fun_type: FunctionType,
-    locals: [U8_COUNT]Local,
-    local_count: usize,
+    locals: std.ArrayList(Local),
     scope_depth: usize,
 
     pub fn init(
@@ -56,16 +55,17 @@ const Compiler = struct {
         fun_type: FunctionType,
         enclosing: *Compiler,
     ) !Compiler {
-        var function = try Function.init(allocator);
-
         return Compiler{
             .enclosing = enclosing,
-            .function = &function,
+            .function = @constCast(&(try Function.init(allocator))),
             .fun_type = fun_type,
-            .locals = undefined,
-            .local_count = 0,
+            .locals = std.ArrayList(Local).init(allocator),
             .scope_depth = 0,
         };
+    }
+
+    pub fn deinit(self: *Compiler) void {
+        self.locals.deinit();
     }
 };
 
@@ -92,7 +92,6 @@ pub const Parser = struct {
     source: []const u8,
     scanner: Scanner,
     strings: *std.StringHashMap(Value),
-    compiler: Compiler,
     current_compiler: *Compiler = undefined,
     local: *Local = undefined,
     current: Token = undefined,
@@ -154,17 +153,19 @@ pub const Parser = struct {
             .allocator = allocator,
             .source = source,
             .scanner = Scanner.init(source),
-            .compiler = try Compiler.init(allocator, FunctionType.Script, undefined),
+            .current_compiler = @constCast(&(try Compiler.init(allocator, FunctionType.Script, undefined))),
             .strings = strings,
         };
 
-        parser.current_compiler = &parser.compiler;
-
-        parser.local = &parser.current_compiler.locals[parser.current_compiler.local_count];
-        parser.current_compiler.local_count += 1;
-        parser.local.maybe_depth = 0;
-        parser.local.name.start = "";
-        parser.local.name.length = 0;
+        parser.current_compiler.locals.append(Local{
+            .name = Token{
+                .start = "",
+                .length = 0,
+            },
+            .maybe_depth = 0,
+        }) catch {
+            return InterpretError.CompileError;
+        };
 
         return parser;
     }
@@ -247,13 +248,13 @@ pub const Parser = struct {
 
         // Clean up after the local scope.
         var curr: *Compiler = self.current_compiler;
-        while (curr.local_count > 0 and curr.locals[curr.local_count - 1].maybe_depth.? > curr.scope_depth) {
+        while (curr.locals.items.len > 0 and curr.locals.getLast().maybe_depth.? > curr.scope_depth) {
             // Emit instruction to pop all constants in the stack corresponding to
             // the ending scope.
             self.emit_byte(@intFromEnum(OpCode.Pop));
 
             // Reduce the number of local variables stored in the compiler.
-            curr.local_count -= 1;
+            _ = curr.locals.pop();
         }
     }
 
@@ -317,7 +318,6 @@ pub const Parser = struct {
         self.block();
 
         const function = self.end_compiler();
-        // defer function.deinit();
         self.emit_bytes(@intFromEnum(OpCode.Constant), self.make_constant(Value.function(function)));
     }
 
@@ -713,6 +713,7 @@ pub const Parser = struct {
         self.consume(TokenType.Identifier, error_message);
 
         self.declare_variable();
+
         // If we're at a local scope, we don't store the variable in the constant table.
         if (self.current_compiler.scope_depth > 0) return 0;
 
@@ -724,8 +725,12 @@ pub const Parser = struct {
         if (self.current_compiler.scope_depth == 0) return;
 
         // Make variables in the scopes above available for the current scope.
-        const curr: *Compiler = self.current_compiler;
-        curr.locals[curr.local_count - 1].maybe_depth = curr.scope_depth;
+        const curr = self.current_compiler;
+
+        curr.function.println();
+        std.debug.print("{}\n", .{self.current_compiler.scope_depth});
+
+        curr.locals.items[curr.locals.items.len - 1].maybe_depth = curr.scope_depth;
     }
 
     fn identifier_constant(self: *Parser, name: *Token) u8 {
@@ -738,6 +743,7 @@ pub const Parser = struct {
             // TODO: Handle allocation error.
             return 0;
         };
+
         return self.make_constant(obj_str);
     }
 
@@ -750,13 +756,13 @@ pub const Parser = struct {
         const name: *Token = &self.previous;
 
         // Check for duplicate. Current scope is always at the end of the array.
-        if (self.current_compiler.local_count > 0) {
-            var i: usize = self.current_compiler.local_count;
+        if (self.current_compiler.locals.items.len > 0) {
+            var i: usize = self.current_compiler.locals.items.len;
 
             while (i > 0) {
                 i -= 1;
 
-                const local: *Local = &self.current_compiler.locals[i];
+                const local: *Local = &self.current_compiler.locals.items[i];
 
                 if (local.maybe_depth.? != -1 and local.maybe_depth.? < self.current_compiler.scope_depth) {
                     break;
@@ -772,16 +778,18 @@ pub const Parser = struct {
     }
 
     fn add_local(self: *Parser, name: Token) void {
-        if (self.current_compiler.local_count == U8_COUNT) {
+        if (self.current_compiler.locals.items.len == U8_COUNT) {
             self.err("Too many local variables in function.");
             return;
         }
 
         // Store local variable in the current compiler's storage.
-        var local: *Local = &self.current_compiler.locals[self.current_compiler.local_count];
-        local.name = name;
-        local.maybe_depth = null;
-        self.current_compiler.local_count += 1;
+        self.current_compiler.locals.append(Local{
+            .name = name,
+            .maybe_depth = null,
+        }) catch {
+            self.err("Error defining local var.");
+        };
     }
 
     fn define_variable(self: *Parser, global: u8) void {
@@ -832,16 +840,16 @@ pub const Parser = struct {
     }
 
     fn resolve_local(self: *Parser, compiler: *Compiler, name: *Token) ?usize {
-        if (compiler.local_count == 0) {
+        if (compiler.locals.items.len == 0) {
             return null;
         }
 
-        var i: usize = compiler.local_count;
+        var i: usize = compiler.locals.items.len;
 
         while (i > 0) {
             i -= 1;
 
-            const local: *Local = &compiler.locals[i];
+            const local: *Local = &compiler.locals.items[i];
 
             if (identifier_equals(name, &local.name)) {
                 if (local.maybe_depth) |_| {
