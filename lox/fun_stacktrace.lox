@@ -1,7 +1,13 @@
 fun a() { b(); }
-fun b() { c(); }
+
+fun b() { 
+  var i = 1; 
+  print i;
+//  c();
+}
+
 fun c() {
-  c("too", "many", "args");
+  print "Hello";
 }
 
 a();

@@ -31,9 +31,9 @@ pub fn main() !void {
     }
 
     if (args.getSingleValue("FILE")) |f| {
-        try run_file(f, &vm, allocator);
+        try run_file(f, vm, allocator);
     } else {
-        try repl(&vm, allocator);
+        try repl(vm, allocator);
     }
 
     std.process.exit(0);
@@ -50,9 +50,7 @@ fn repl(vm: *VirtualMachine, allocator: std.mem.Allocator) !void {
         // Akin to Rust's if-let
         if (maybe_input) |input| {
             defer allocator.free(input);
-            _ = vm.interpret(input) catch {
-                std.debug.print("Error!\n", .{});
-            };
+            _ = vm.interpret(input) catch {};
         } else {
             std.debug.print("\n", .{});
             break;

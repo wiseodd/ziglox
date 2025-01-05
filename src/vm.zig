@@ -41,7 +41,7 @@ pub const VirtualMachine = struct {
     strings: std.StringHashMap(Value),
     globals: std.StringHashMap(Value),
 
-    pub fn init(allocator: std.mem.Allocator) VirtualMachine {
+    pub fn init(allocator: std.mem.Allocator) *VirtualMachine {
         var vm = VirtualMachine{
             .allocator = allocator,
             .frames = undefined,
@@ -53,7 +53,7 @@ pub const VirtualMachine = struct {
 
         vm.reset_stack();
 
-        return vm;
+        return &vm;
     }
 
     pub fn deinit(self: *VirtualMachine) void {
@@ -82,9 +82,10 @@ pub const VirtualMachine = struct {
             if (flags.DEBUG_TRACE_EXECUTION) {
                 std.debug.print("          ", .{});
 
-                for (self.stack[0..self.stack_top_idx]) |val| {
+                var val_ptr = self.stack_top - 1;
+                while (@intFromPtr(val_ptr) >= @intFromPtr(self.stack[0..])) : (val_ptr -= 1) {
                     std.debug.print("[ ", .{});
-                    val.print();
+                    val_ptr[0].print();
                     std.debug.print(" ]", .{});
                 }
 
@@ -98,8 +99,6 @@ pub const VirtualMachine = struct {
             }
 
             const instruction: OpCode = @enumFromInt(self.read_byte(frame));
-
-            // std.debug.print("{}\n\n", .{instruction});
 
             switch (instruction) {
                 OpCode.Constant => {
@@ -194,6 +193,7 @@ pub const VirtualMachine = struct {
                         try self.push(res_val);
                     } else {
                         self.runtime_error("Operands must be two numbers or two strings", .{});
+                        return InterpretError.RuntimeError;
                     }
                 },
 
@@ -293,13 +293,11 @@ pub const VirtualMachine = struct {
                 "Expected {d} arguments but got {d}.",
                 .{ function.arity, arg_count },
             );
-
             return InterpretError.RuntimeError;
         }
 
         if (self.frame_count == FRAMES_MAX) {
             self.runtime_error("Stack overflow.", .{});
-
             return InterpretError.RuntimeError;
         }
 
@@ -315,7 +313,7 @@ pub const VirtualMachine = struct {
     fn call_value(self: *VirtualMachine, callee: Value, arg_count: usize) InterpretError!void {
         if (callee.is_object()) {
             switch (callee) {
-                .Function => |function| return self.call(@constCast(&function), arg_count),
+                .Function => |function| return self.call(function, arg_count),
                 else => {},
             }
         }
@@ -334,9 +332,9 @@ pub const VirtualMachine = struct {
         while (i > 0) {
             i -= 1;
 
-            const frame: *CallFrame = @constCast(&self.frames[i]);
+            const frame: CallFrame = self.frames[i];
             const function = frame.function;
-            const instruction: usize = @intFromPtr(frame.ip) - @intFromPtr(frame.function.chunk.code.items.ptr);
+            const instruction: usize = @intFromPtr(frame.ip) - @intFromPtr(function.chunk.code.items.ptr) - 1;
             std.debug.print("[line {}] in ", .{function.chunk.lines.items[instruction]});
 
             if (function.name) |name| {

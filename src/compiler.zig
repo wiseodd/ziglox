@@ -317,6 +317,7 @@ pub const Parser = struct {
         self.block();
 
         const function = self.end_compiler();
+        // defer function.deinit();
         self.emit_bytes(@intFromEnum(OpCode.Constant), self.make_constant(Value.function(function)));
     }
 

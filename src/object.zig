@@ -46,8 +46,11 @@ pub const Function = struct {
     }
 
     pub fn deinit(self: Function) void {
-        self.name.deinit();
         self.chunk.deinit();
+
+        if (self.name) |name| {
+            name.deinit();
+        }
     }
 
     pub fn print(self: *const Function) void {
