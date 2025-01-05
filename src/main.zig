@@ -51,9 +51,8 @@ fn repl(vm: *VirtualMachine, allocator: std.mem.Allocator) !void {
         if (maybe_input) |input| {
             defer allocator.free(input);
             _ = vm.interpret(input) catch {
-                std.debug.print("Not implemented yet!\n", .{});
+                std.debug.print("Error!\n", .{});
             };
-            break;
         } else {
             std.debug.print("\n", .{});
             break;
@@ -66,14 +65,8 @@ fn run_file(path: []const u8, vm: *VirtualMachine, allocator: std.mem.Allocator)
     defer allocator.free(source);
 
     _ = vm.interpret(source) catch |err| switch (err) {
-        InterpretError.CompileError => {
-            std.debug.print("Not implemented yet!\n", .{});
-            std.process.exit(65);
-        },
-        InterpretError.RuntimeError => {
-            std.debug.print("Not implemented yet!\n", .{});
-            std.process.exit(70);
-        },
+        InterpretError.CompileError => std.process.exit(65),
+        InterpretError.RuntimeError => std.process.exit(70),
     };
 
     return;

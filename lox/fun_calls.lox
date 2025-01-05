@@ -1,0 +1,17 @@
+fun a(name) { 
+  print "Hello " + name;
+}
+
+fun b(name2) { 
+  print "Whassup " + name2;
+}
+
+fun c(name3) { 
+  print "Cheers " + name3;
+}
+
+a("Me");
+b("You");
+c("They");
+
+print "Done!";

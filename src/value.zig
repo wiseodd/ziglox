@@ -13,7 +13,7 @@ pub const Value = union(enum) {
     Bool: bool,
     Number: f64,
     String: String,
-    Function: *Function,
+    Function: Function,
     Nil: void,
 
     pub fn print(self: Value) void {
@@ -73,7 +73,7 @@ pub const Value = union(enum) {
     }
 
     pub inline fn function(value: *Function) Value {
-        return Value{ .Function = value };
+        return Value{ .Function = value.* };
     }
 
     pub inline fn string(
@@ -114,6 +114,10 @@ pub const Value = union(enum) {
             .String => true,
             else => false,
         };
+    }
+
+    pub inline fn is_object(self: Value) bool {
+        return self.is_function() or self.is_string();
     }
 
     pub inline fn is_nil(self: Value) bool {

@@ -33,24 +33,30 @@ pub const CallFrame = struct {
 
 pub const VirtualMachine = struct {
     allocator: std.mem.Allocator,
-    frames: std.ArrayList(CallFrame),
-    stack: std.ArrayList(Value),
+    frames: [FRAMES_MAX]CallFrame,
+    frame_count: usize,
+    stack: [STACK_MAX]Value,
+    stack_top: [*]Value = undefined,
+    stack_top_idx: usize = 0,
     strings: std.StringHashMap(Value),
     globals: std.StringHashMap(Value),
 
     pub fn init(allocator: std.mem.Allocator) VirtualMachine {
-        return VirtualMachine{
+        var vm = VirtualMachine{
             .allocator = allocator,
-            .frames = std.ArrayList(CallFrame).init(allocator),
-            .stack = std.ArrayList(Value).init(allocator),
+            .frames = undefined,
+            .frame_count = 0,
+            .stack = undefined,
             .strings = std.StringHashMap(Value).init(allocator),
             .globals = std.StringHashMap(Value).init(allocator),
         };
+
+        vm.reset_stack();
+
+        return vm;
     }
 
     pub fn deinit(self: *VirtualMachine) void {
-        self.frames.deinit();
-        self.stack.deinit();
         self.strings.deinit();
         self.globals.deinit();
     }
@@ -61,30 +67,27 @@ pub const VirtualMachine = struct {
 
         // Put the top-level function into the call frame
         try self.push(Value.function(function));
-        const frame = CallFrame.init(
-            function,
-            function.chunk.code.items.ptr,
-            self.stack.items.ptr,
-        );
-        self.frames.append(frame) catch {
-            return InterpretError.RuntimeError;
-        };
+
+        // Call the top-level frame
+        try self.call(function, 0);
 
         try self.run();
     }
 
     fn run(self: *VirtualMachine) InterpretError!void {
-        const frame: *CallFrame = @constCast(&self.frames.getLast());
+        var frame: *CallFrame = &self.frames[self.frame_count - 1];
 
         // Note that self.read_byte() advances the pointer
         while (true) {
             if (flags.DEBUG_TRACE_EXECUTION) {
                 std.debug.print("          ", .{});
-                for (self.stack.items) |slot| {
+
+                for (self.stack[0..self.stack_top_idx]) |val| {
                     std.debug.print("[ ", .{});
-                    slot.print();
+                    val.print();
                     std.debug.print(" ]", .{});
                 }
+
                 std.debug.print("\n", .{});
 
                 // @intFromPtr converts a pointer to its usize address.
@@ -96,28 +99,38 @@ pub const VirtualMachine = struct {
 
             const instruction: OpCode = @enumFromInt(self.read_byte(frame));
 
+            // std.debug.print("{}\n\n", .{instruction});
+
             switch (instruction) {
                 OpCode.Constant => {
                     const constant: Value = self.read_constant(frame);
                     try self.push(constant);
                 },
+
                 OpCode.Nil => try self.push(Value.nil()),
+
                 OpCode.True => try self.push(Value.boolean(true)),
+
                 OpCode.False => try self.push(Value.boolean(false)),
+
                 OpCode.Equal => {
                     const b = try self.pop();
                     const a = try self.pop();
                     try self.push(Value.boolean(a.equals(b)));
                 },
+
                 OpCode.Pop => _ = try self.pop(),
+
                 OpCode.GetLocal => {
                     const slot: usize = @intCast(self.read_byte(frame));
                     try self.push(frame.slots[slot]);
                 },
+
                 OpCode.SetLocal => {
                     const slot: usize = @intCast(self.read_byte(frame));
                     frame.slots[slot] = self.peek(0);
                 },
+
                 OpCode.GetGlobal => {
                     const name: []const u8 = try self.read_string(frame);
 
@@ -128,6 +141,7 @@ pub const VirtualMachine = struct {
                         return InterpretError.RuntimeError;
                     }
                 },
+
                 OpCode.DefineGlobal => {
                     const name: []const u8 = try self.read_string(frame);
                     self.globals.put(name, self.peek(0)) catch {
@@ -135,6 +149,7 @@ pub const VirtualMachine = struct {
                     };
                     _ = try self.pop();
                 },
+
                 OpCode.SetGlobal => {
                     const name: []const u8 = try self.read_string(frame);
 
@@ -147,8 +162,11 @@ pub const VirtualMachine = struct {
                         return InterpretError.RuntimeError;
                     };
                 },
+
                 OpCode.Greater => try self.binary_op(OpCode.Greater),
+
                 OpCode.Less => try self.binary_op(OpCode.Less),
+
                 OpCode.Add => {
                     if (self.peek(0).is_string() and self.peek(1).is_string()) {
                         const str2: []const u8 = (try self.pop()).String.chars;
@@ -178,10 +196,15 @@ pub const VirtualMachine = struct {
                         self.runtime_error("Operands must be two numbers or two strings", .{});
                     }
                 },
+
                 OpCode.Substract => try self.binary_op(OpCode.Substract),
+
                 OpCode.Multiply => try self.binary_op(OpCode.Multiply),
+
                 OpCode.Divide => try self.binary_op(OpCode.Divide),
+
                 OpCode.Not => try self.push(Value.boolean((try self.pop()).is_falsey())),
+
                 OpCode.Negate => {
                     switch (self.peek(0)) {
                         .Number => {
@@ -194,15 +217,18 @@ pub const VirtualMachine = struct {
                         },
                     }
                 },
+
                 OpCode.Print => {
                     const value: Value = try self.pop();
                     value.print();
                     std.debug.print("\n", .{});
                 },
+
                 OpCode.Jump => {
                     const offset: usize = self.read_short(frame);
                     frame.ip += offset;
                 },
+
                 OpCode.JumpIfFalse => {
                     const offset: usize = self.read_short(frame);
 
@@ -215,55 +241,118 @@ pub const VirtualMachine = struct {
                         frame.ip += offset;
                     }
                 },
+
                 OpCode.Loop => {
                     const offset: usize = self.read_short(frame);
                     // Jump backward to the start of the loop.
                     frame.ip -= offset;
                 },
+
+                OpCode.Call => {
+                    const arg_count: u8 = self.read_byte(frame);
+                    try self.call_value(self.peek(arg_count), arg_count);
+                    frame = &self.frames[self.frame_count - 1];
+                },
+
                 OpCode.Return => {
-                    return;
+                    const result: Value = try self.pop();
+                    self.frame_count -= 1;
+
+                    if (self.frame_count == 0) {
+                        _ = try self.pop();
+                        return;
+                    }
+
+                    self.stack_top = frame.slots;
+                    try self.push(result);
+                    frame = &self.frames[self.frame_count - 1];
                 },
             }
         }
     }
 
     fn push(self: *VirtualMachine, value: Value) InterpretError!void {
-        self.stack.append(value) catch {
-            return InterpretError.RuntimeError;
-        };
+        self.stack_top[0] = value;
+        self.stack_top += 1;
+        self.stack_top_idx += 1;
     }
 
     fn pop(self: *VirtualMachine) InterpretError!Value {
-        if (self.stack.items.len == 0) {
-            return InterpretError.RuntimeError;
-        }
-
-        return self.stack.pop();
+        self.stack_top -= 1;
+        self.stack_top_idx -= 1;
+        return self.stack_top[0];
     }
 
     fn peek(self: *VirtualMachine, distance: usize) Value {
-        return self.stack.items[self.stack.items.len - 1 - distance];
+        return (self.stack_top - 1 - distance)[0];
+    }
+
+    fn call(self: *VirtualMachine, function: *Function, arg_count: usize) InterpretError!void {
+        if (arg_count != function.arity) {
+            self.runtime_error(
+                "Expected {d} arguments but got {d}.",
+                .{ function.arity, arg_count },
+            );
+
+            return InterpretError.RuntimeError;
+        }
+
+        if (self.frame_count == FRAMES_MAX) {
+            self.runtime_error("Stack overflow.", .{});
+
+            return InterpretError.RuntimeError;
+        }
+
+        var frame: *CallFrame = &self.frames[self.frame_count];
+        frame.function = function;
+        frame.ip = function.chunk.code.items.ptr;
+        // This points to the last position in the stack before the current frame
+        frame.slots = self.stack_top - arg_count;
+
+        self.frame_count += 1;
+    }
+
+    fn call_value(self: *VirtualMachine, callee: Value, arg_count: usize) InterpretError!void {
+        if (callee.is_object()) {
+            switch (callee) {
+                .Function => |function| return self.call(@constCast(&function), arg_count),
+                else => {},
+            }
+        }
+
+        self.runtime_error("Can only call functions and classes.", .{});
+        return InterpretError.RuntimeError;
     }
 
     fn runtime_error(self: *VirtualMachine, comptime format: []const u8, args: anytype) void {
         std.debug.print(format, args);
         std.debug.print("\n", .{});
 
-        const frame: *CallFrame = @constCast(&self.frames.getLast());
+        // Print stacktrace
+        var i: usize = self.frame_count;
 
-        // Distance between the current pointer to the beginning.
-        // Note that there's `- 1` there because `self.ip` has been advanced by one
-        // when an instruction is read via `self.read_byte()`.
-        const instruction: usize = @intFromPtr(frame.ip) - @intFromPtr(frame.function.chunk.code.items.ptr) - 1;
-        const line: usize = frame.function.chunk.lines.items[instruction];
-        std.debug.print("[Line {}] in script\n", .{line});
+        while (i > 0) {
+            i -= 1;
+
+            const frame: *CallFrame = @constCast(&self.frames[i]);
+            const function = frame.function;
+            const instruction: usize = @intFromPtr(frame.ip) - @intFromPtr(frame.function.chunk.code.items.ptr);
+            std.debug.print("[line {}] in ", .{function.chunk.lines.items[instruction]});
+
+            if (function.name) |name| {
+                std.debug.print("{s}()\n", .{name.chars});
+            } else {
+                std.debug.print("script\n", .{});
+            }
+        }
 
         self.reset_stack();
     }
 
     pub fn reset_stack(self: *VirtualMachine) void {
-        self.stack.deinit();
-        self.stack = std.ArrayList(Value).init(self.allocator);
+        self.stack_top = self.stack[0..];
+        self.stack_top_idx = 0;
+        self.frame_count = 0;
     }
 
     // Inline function to emulate C macro
@@ -294,7 +383,7 @@ pub const VirtualMachine = struct {
         // into a u16. Note that we use pointer arithmetic to do the indexing.
         const msb: usize = @intCast((frame.ip - 2)[0]);
         const lsb: usize = @intCast((frame.ip - 1)[0]);
-        return msb << @intCast(8) | lsb;
+        return (msb << @intCast(8)) | lsb;
     }
 
     inline fn read_string(self: *VirtualMachine, frame: *CallFrame) InterpretError![]const u8 {
@@ -305,7 +394,7 @@ pub const VirtualMachine = struct {
     }
 
     inline fn binary_op(self: *VirtualMachine, op: OpCode) InterpretError!void {
-        if (self.peek(0) != Value.Number or self.peek(1) != Value.Number) {
+        if (!self.peek(0).is_number() or !self.peek(1).is_number()) {
             self.runtime_error("Operands must be numbers.", .{});
             return InterpretError.RuntimeError;
         }

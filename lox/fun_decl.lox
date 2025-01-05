@@ -2,4 +2,9 @@ fun areWeHavingItYet() {
   print "Yes we are!";
 }
 
+fun whatever() {
+  print "no!";
+}
+
 print areWeHavingItYet;
+print whatever;

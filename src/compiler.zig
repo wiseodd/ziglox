@@ -103,7 +103,7 @@ pub const Parser = struct {
     // We build a static parse rules table here and access it through pointers.
     // It's more efficient than having a function that return a new `ParseRule` each time.
     parse_rules: ParseRules = ParseRules.init(.{
-        .LeftParen = ParseRule{ .prefix = grouping, .infix = null, .precedence = Precedence.None },
+        .LeftParen = ParseRule{ .prefix = grouping, .infix = call, .precedence = Precedence.Call },
         .RightParen = ParseRule{},
         .LeftBrace = ParseRule{},
         .RightBrace = ParseRule{},
@@ -178,7 +178,11 @@ pub const Parser = struct {
 
         const function = self.end_compiler();
 
-        return if (self.had_error) InterpretError.CompileError else function;
+        if (self.had_error) {
+            return InterpretError.CompileError;
+        } else {
+            return function;
+        }
     }
 
     fn advance(self: *Parser) void {
@@ -641,6 +645,14 @@ pub const Parser = struct {
         }
     }
 
+    fn call(self: *Parser, can_assign: bool) void {
+        // Ignore
+        _ = can_assign;
+
+        const arg_count: u8 = self.argument_list();
+        self.emit_bytes(@intFromEnum(OpCode.Call), arg_count);
+    }
+
     fn literal(self: *Parser, can_assign: bool) void {
         // Ignore
         _ = can_assign;
@@ -738,8 +750,11 @@ pub const Parser = struct {
 
         // Check for duplicate. Current scope is always at the end of the array.
         if (self.current_compiler.local_count > 0) {
-            var i: usize = self.current_compiler.local_count - 1;
-            while (i >= 0) : (i -= 1) {
+            var i: usize = self.current_compiler.local_count;
+
+            while (i > 0) {
+                i -= 1;
+
                 const local: *Local = &self.current_compiler.locals[i];
 
                 if (local.maybe_depth.? != -1 and local.maybe_depth.? < self.current_compiler.scope_depth) {
@@ -780,6 +795,30 @@ pub const Parser = struct {
         self.emit_bytes(@intFromEnum(OpCode.DefineGlobal), global);
     }
 
+    fn argument_list(self: *Parser) u8 {
+        var arg_count: u8 = 0;
+
+        if (!self.check(TokenType.RightParen)) {
+            while (true) {
+                self.expression();
+
+                if (arg_count == 255) {
+                    self.err("Can't have more than 255 arguments.");
+                }
+
+                arg_count += 1;
+
+                if (!self.match(TokenType.Comma)) {
+                    break;
+                }
+            }
+        }
+
+        _ = self.consume(TokenType.RightParen, "Expect ')' after arguments.");
+
+        return arg_count;
+    }
+
     fn and_(self: *Parser, can_assign: bool) void {
         _ = can_assign;
 
@@ -796,8 +835,11 @@ pub const Parser = struct {
             return null;
         }
 
-        var i: usize = compiler.local_count - 1;
-        while (i >= 0) : (i -= 1) {
+        var i: usize = compiler.local_count;
+
+        while (i > 0) {
+            i -= 1;
+
             const local: *Local = &compiler.locals[i];
 
             if (identifier_equals(name, &local.name)) {
@@ -853,6 +895,7 @@ pub const Parser = struct {
     }
 
     fn emit_return(self: *Parser) void {
+        self.emit_byte(@intFromEnum(OpCode.Nil));
         self.emit_byte(@intFromEnum(OpCode.Return));
     }
 
