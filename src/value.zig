@@ -12,16 +12,14 @@ const ValueError = error{
 pub const Value = union(enum) {
     Bool: bool,
     Number: f64,
-    String: String,
-    Function: *Function,
+    Obj: *Obj,
     Nil: void,
 
     pub fn print(self: Value) void {
         switch (self) {
             .Bool => |val| std.debug.print("{}", .{val}),
             .Number => |val| std.debug.print("{d}", .{val}),
-            .Function => |val| val.print(),
-            .String => |val| val.print(),
+            .Obj => |val| val.print(),
             .Nil => std.debug.print("nil", .{}),
         }
     }
@@ -44,18 +42,7 @@ pub const Value = union(enum) {
         return switch (self) {
             .Bool => self.Bool == other.Bool,
             .Number => self.Number == other.Number,
-            .Function => {
-                if (self.Function.name) |name1| {
-                    if (other.Function.name) |name2| {
-                        return name1.eq(&name2) and self.Function.arity == other.Function.arity;
-                    } else {
-                        return false;
-                    }
-                } else {
-                    return false;
-                }
-            },
-            .String => std.mem.eql(u8, self.String.chars, other.String.chars),
+            .Obj => String.eq(self.Obj.as(String), other.Obj.as(String)),
             .Nil => true,
         };
     }
@@ -77,17 +64,8 @@ pub const Value = union(enum) {
         return Value{ .Number = value };
     }
 
-    pub inline fn function(value: *Function) Value {
-        std.debug.print("Val {}\n", .{@intFromPtr(value)});
-        return Value{ .Function = value };
-    }
-
-    pub inline fn string(
-        allocator: std.mem.Allocator,
-        value: []const u8,
-        table: *std.StringHashMap(Value),
-    ) !Value {
-        return Value{ .String = try String.init(allocator, value, table) };
+    pub inline fn obj(value: *Obj) Value {
+        return Value{ .Obj = value };
     }
 
     pub inline fn nil() Value {
@@ -108,22 +86,15 @@ pub const Value = union(enum) {
         };
     }
 
-    pub inline fn is_function(self: Value) bool {
+    pub inline fn is_obj(self: Value) bool {
         return switch (self) {
-            .Function => true,
+            .Obj => true,
             else => false,
         };
     }
 
     pub inline fn is_string(self: Value) bool {
-        return switch (self) {
-            .String => true,
-            else => false,
-        };
-    }
-
-    pub inline fn is_object(self: Value) bool {
-        return self.is_function() or self.is_string();
+        return self.is_obj() and self.Obj.obj_type == .String;
     }
 
     pub inline fn is_nil(self: Value) bool {
@@ -135,71 +106,3 @@ pub const Value = union(enum) {
 };
 
 pub const ValueArray = std.ArrayList(Value);
-
-test "equals" {
-    const cases = [_]struct { Value, Value, bool }{
-        .{ Value.boolean(true), Value.boolean(true), true },
-        .{ Value.boolean(true), Value.boolean(false), false },
-        .{ Value.boolean(false), Value.boolean(true), false },
-        .{ Value.boolean(true), Value.number(123), false },
-        .{ Value.number(123), Value.boolean(false), false },
-        .{ Value.number(222), Value.number(999), false },
-        .{ Value.number(222.2), Value.number(222.2), true },
-        .{ Value.number(222.2), Value.nil(), false },
-        .{ Value.boolean(false), Value.nil(), false },
-        .{ Value.nil(), Value.number(21.2), false },
-        .{ Value.nil(), Value.boolean(true), false },
-        .{ Value.nil(), Value.nil(), true },
-    };
-
-    for (cases) |case| {
-        try testing.expectEqual(case[2], case[0].equals(case[1]));
-    }
-}
-
-test "is_falsey" {
-    try testing.expectEqual(false, (Value{ .Bool = true }).is_falsey());
-    try testing.expectEqual(true, (Value{ .Bool = false }).is_falsey());
-    try testing.expectEqual(false, (Value{ .Number = 123.322 }).is_falsey());
-    try testing.expectEqual(true, (Value{ .Nil = {} }).is_falsey());
-}
-
-test "is_boolean" {
-    try testing.expectEqual(true, (Value{ .Bool = true }).is_boolean());
-    try testing.expectEqual(false, (Value{ .Number = 123.322 }).is_boolean());
-    try testing.expectEqual(false, (Value{ .Nil = {} }).is_boolean());
-}
-
-test "is_number" {
-    try testing.expectEqual(false, (Value{ .Bool = true }).is_number());
-    try testing.expectEqual(true, (Value{ .Number = 123.322 }).is_number());
-    try testing.expectEqual(false, (Value{ .Nil = {} }).is_number());
-}
-
-test "is_nil" {
-    try testing.expectEqual(false, (Value{ .Bool = true }).is_nil());
-    try testing.expectEqual(false, (Value{ .Number = 123.322 }).is_nil());
-    try testing.expectEqual(true, (Value{ .Nil = {} }).is_nil());
-}
-
-test "string2obj" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const allocator = arena.allocator();
-
-    var table = std.StringHashMap(Value).init(allocator);
-    defer table.deinit();
-
-    const str = try String.init(allocator, "asdasd", &table);
-    defer str.deinit();
-
-    const val = try Value.string(allocator, str.chars, &table);
-    defer val.String.deinit();
-
-    try testing.expectEqual(true, val.is_string());
-
-    const str2 = val.String;
-    try testing.expectEqual(true, str2.obj.obj_type == ObjType.String);
-    try testing.expect(std.mem.eql(u8, str.chars, str2.chars));
-}

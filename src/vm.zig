@@ -6,6 +6,7 @@ const Value = @import("value.zig").Value;
 const debug = @import("debug.zig");
 const flags = @import("flags.zig");
 const Parser = @import("compiler.zig").Parser;
+const Obj = @import("object.zig").Obj;
 const Function = @import("object.zig").Function;
 const String = @import("object.zig").String;
 
@@ -38,6 +39,7 @@ pub const VirtualMachine = struct {
     stack: [STACK_MAX]Value,
     stack_top: [*]Value = undefined,
     stack_top_idx: usize = 0,
+    objects: ?*Obj, // Linked list of objects (funcs, strs, etc) created
     strings: std.StringHashMap(Value),
     globals: std.StringHashMap(Value),
 
@@ -47,6 +49,7 @@ pub const VirtualMachine = struct {
             .frames = undefined,
             .frame_count = 0,
             .stack = undefined,
+            .objects = null,
             .strings = std.StringHashMap(Value).init(allocator),
             .globals = std.StringHashMap(Value).init(allocator),
         };
@@ -62,11 +65,13 @@ pub const VirtualMachine = struct {
     }
 
     pub fn interpret(self: *VirtualMachine, source: []const u8) InterpretError!void {
-        var parser = try Parser.init(self.allocator, source, &self.strings);
+        var parser = Parser.init(self, source) catch {
+            return InterpretError.CompileError;
+        };
         const function = try parser.compile();
 
         // Put the top-level function into the call frame
-        try self.push(Value.function(function));
+        try self.push(Value.obj(function.as_obj()));
 
         for (function.chunk.constants.items) |v| {
             v.print();
@@ -173,23 +178,19 @@ pub const VirtualMachine = struct {
 
                 OpCode.Add => {
                     if (self.peek(0).is_string() and self.peek(1).is_string()) {
-                        const str2: []const u8 = (try self.pop()).String.chars;
-                        const str1: []const u8 = (try self.pop()).String.chars;
+                        const str2: []const u8 = (try self.pop()).Obj.as(String).chars;
+                        const str1: []const u8 = (try self.pop()).Obj.as(String).chars;
 
                         var res_chars = self.allocator.alloc(u8, str1.len + str2.len) catch {
                             return InterpretError.RuntimeError;
                         };
                         @memcpy(res_chars[0..str1.len], str1);
                         @memcpy(res_chars[str1.len..], str2);
-                        const res_val = Value.string(
-                            self.allocator,
-                            res_chars,
-                            &self.strings,
-                        ) catch {
+                        const res_str = String.init(res_chars, self) catch {
                             return InterpretError.RuntimeError;
                         };
 
-                        try self.push(res_val);
+                        try self.push(Value.obj(res_str.as_obj()));
                     } else if (self.peek(0).is_number() and self.peek(1).is_number()) {
                         const num2: f64 = (try self.pop()).Number;
                         const num1: f64 = (try self.pop()).Number;
@@ -316,11 +317,8 @@ pub const VirtualMachine = struct {
     }
 
     fn call_value(self: *VirtualMachine, callee: Value, arg_count: usize) InterpretError!void {
-        if (callee.is_object()) {
-            switch (callee) {
-                .Function => |function| return self.call(function, arg_count),
-                else => {},
-            }
+        if (callee.is_obj()) {
+            try self.call(callee.Obj.as(Function), arg_count);
         }
 
         self.runtime_error("Can only call functions and classes.", .{});
@@ -390,10 +388,7 @@ pub const VirtualMachine = struct {
     }
 
     inline fn read_string(self: *VirtualMachine, frame: *CallFrame) InterpretError![]const u8 {
-        switch (self.read_constant(frame)) {
-            .String => |val| return val.chars,
-            else => return InterpretError.RuntimeError,
-        }
+        return self.read_constant(frame).Obj.as(String).chars;
     }
 
     inline fn binary_op(self: *VirtualMachine, op: OpCode) InterpretError!void {

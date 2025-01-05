@@ -47,19 +47,21 @@ const Compiler = struct {
     enclosing: *Compiler,
     function: *Function,
     fun_type: FunctionType,
-    locals: std.ArrayList(Local),
+    locals: [U8_COUNT]Local,
+    local_count: usize,
     scope_depth: usize,
 
     pub fn init(
-        allocator: std.mem.Allocator,
+        vm: *VirtualMachine,
         fun_type: FunctionType,
         enclosing: *Compiler,
     ) !Compiler {
         return Compiler{
             .enclosing = enclosing,
-            .function = @constCast(&(try Function.init(allocator))),
+            .function = try Function.init(vm),
             .fun_type = fun_type,
-            .locals = std.ArrayList(Local).init(allocator),
+            .locals = undefined,
+            .local_count = 0,
             .scope_depth = 0,
         };
     }
@@ -88,10 +90,9 @@ pub const Parser = struct {
     // Type alias
     const ParseRules = std.EnumArray(TokenType, ParseRule);
 
-    allocator: std.mem.Allocator,
+    vm: *VirtualMachine,
     source: []const u8,
     scanner: Scanner,
-    strings: *std.StringHashMap(Value),
     current_compiler: *Compiler = undefined,
     local: *Local = undefined,
     current: Token = undefined,
@@ -145,27 +146,21 @@ pub const Parser = struct {
     }),
 
     pub fn init(
-        allocator: std.mem.Allocator,
+        vm: *VirtualMachine,
         source: []const u8,
-        strings: *std.StringHashMap(Value),
     ) !Parser {
         var parser = Parser{
-            .allocator = allocator,
+            .vm = vm,
             .source = source,
             .scanner = Scanner.init(source),
-            .current_compiler = @constCast(&(try Compiler.init(allocator, FunctionType.Script, undefined))),
-            .strings = strings,
+            .current_compiler = @constCast(&(try Compiler.init(vm, .Script, undefined))),
         };
 
-        parser.current_compiler.locals.append(Local{
-            .name = Token{
-                .start = "",
-                .length = 0,
-            },
-            .maybe_depth = 0,
-        }) catch {
-            return InterpretError.CompileError;
-        };
+        var local = &parser.current_compiler.locals[0];
+        parser.current_compiler.local_count += 1;
+        local.maybe_depth = 0;
+        local.name.start = "";
+        local.name.length = 0;
 
         return parser;
     }
@@ -248,13 +243,13 @@ pub const Parser = struct {
 
         // Clean up after the local scope.
         var curr: *Compiler = self.current_compiler;
-        while (curr.locals.items.len > 0 and curr.locals.getLast().maybe_depth.? > curr.scope_depth) {
+        while (curr.local_count > 0 and curr.locals[curr.local_count - 1].maybe_depth.? > curr.scope_depth) {
             // Emit instruction to pop all constants in the stack corresponding to
             // the ending scope.
             self.emit_byte(@intFromEnum(OpCode.Pop));
 
             // Reduce the number of local variables stored in the compiler.
-            _ = curr.locals.pop();
+            curr.local_count -= 1;
         }
     }
 
@@ -273,7 +268,7 @@ pub const Parser = struct {
     }
 
     fn fun(self: *Parser, fun_type: FunctionType) void {
-        var compiler = Compiler.init(self.allocator, fun_type, self.current_compiler) catch {
+        var compiler = Compiler.init(self.vm, fun_type, self.current_compiler) catch {
             self.err("Error allocating compiler.");
             return;
         };
@@ -281,9 +276,8 @@ pub const Parser = struct {
 
         if (fun_type != .Script) {
             self.current_compiler.function.name = String.init(
-                self.allocator,
                 self.previous.start[0..self.previous.length],
-                self.strings,
+                self.vm,
             ) catch {
                 self.err("Error allocating string.");
                 return;
@@ -318,7 +312,8 @@ pub const Parser = struct {
         self.block();
 
         const function = self.end_compiler();
-        self.emit_bytes(@intFromEnum(OpCode.Constant), self.make_constant(Value.function(function)));
+        const val = Value.obj(function.as_obj());
+        self.emit_bytes(@intFromEnum(OpCode.Constant), self.make_constant(val));
     }
 
     fn fun_declaration(self: *Parser) void {
@@ -561,10 +556,11 @@ pub const Parser = struct {
         // A string token is a [_]const u8{'"', ..., '"'} array.
         // We want to ignore the quotes.
         const chars = self.previous.start[1 .. self.previous.length - 1];
-        const val = Value.string(self.allocator, chars, self.strings) catch {
+        const str = String.init(chars, self.vm) catch {
             self.err("Error allocating string.");
             return;
         };
+        const val = Value.obj(str.as_obj());
         return self.emit_constant(val);
     }
 
@@ -730,21 +726,17 @@ pub const Parser = struct {
         curr.function.println();
         std.debug.print("{}\n", .{self.current_compiler.scope_depth});
 
-        curr.locals.items[curr.locals.items.len - 1].maybe_depth = curr.scope_depth;
+        curr.locals[curr.local_count - 1].maybe_depth = curr.scope_depth;
     }
 
     fn identifier_constant(self: *Parser, name: *Token) u8 {
-        const obj_str: Value = Value.string(
-            self.allocator,
-            name.start[0..name.length],
-            self.strings,
-        ) catch {
+        const obj_str = String.init(name.start[0..name.length], self.vm) catch {
             self.err("Unable to initialize variable name.");
             // TODO: Handle allocation error.
             return 0;
         };
 
-        return self.make_constant(obj_str);
+        return self.make_constant(Value.obj(obj_str.as_obj()));
     }
 
     fn declare_variable(self: *Parser) void {
@@ -756,13 +748,13 @@ pub const Parser = struct {
         const name: *Token = &self.previous;
 
         // Check for duplicate. Current scope is always at the end of the array.
-        if (self.current_compiler.locals.items.len > 0) {
-            var i: usize = self.current_compiler.locals.items.len;
+        if (self.current_compiler.local_count > 0) {
+            var i: usize = self.current_compiler.local_count;
 
             while (i > 0) {
                 i -= 1;
 
-                const local: *Local = &self.current_compiler.locals.items[i];
+                const local: *Local = &self.current_compiler.locals[i];
 
                 if (local.maybe_depth.? != -1 and local.maybe_depth.? < self.current_compiler.scope_depth) {
                     break;
@@ -778,18 +770,16 @@ pub const Parser = struct {
     }
 
     fn add_local(self: *Parser, name: Token) void {
-        if (self.current_compiler.locals.items.len == U8_COUNT) {
+        if (self.current_compiler.local_count == U8_COUNT) {
             self.err("Too many local variables in function.");
             return;
         }
 
         // Store local variable in the current compiler's storage.
-        self.current_compiler.locals.append(Local{
-            .name = name,
-            .maybe_depth = null,
-        }) catch {
-            self.err("Error defining local var.");
-        };
+        var local: *Local = &self.current_compiler.locals[self.current_compiler.local_count];
+        local.name = name;
+        local.maybe_depth = null;
+        self.current_compiler.local_count += 1;
     }
 
     fn define_variable(self: *Parser, global: u8) void {
@@ -840,16 +830,16 @@ pub const Parser = struct {
     }
 
     fn resolve_local(self: *Parser, compiler: *Compiler, name: *Token) ?usize {
-        if (compiler.locals.items.len == 0) {
+        if (compiler.local_count == 0) {
             return null;
         }
 
-        var i: usize = compiler.locals.items.len;
+        var i: usize = compiler.local_count;
 
         while (i > 0) {
             i -= 1;
 
-            const local: *Local = &compiler.locals.items[i];
+            const local: *Local = &compiler.locals[i];
 
             if (identifier_equals(name, &local.name)) {
                 if (local.maybe_depth) |_| {

@@ -1,6 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
+const VirtualMachine = @import("vm.zig").VirtualMachine;
 const Value = @import("value.zig").Value;
 const Chunk = @import("chunk.zig").Chunk;
 
@@ -15,42 +16,67 @@ pub const FunctionType = enum {
 };
 
 pub const Obj = struct {
+    allocator: Allocator,
     obj_type: ObjType,
+    next: ?*Obj,
 
-    pub fn init(obj_type: ObjType) Obj {
-        return Obj{
+    pub fn init(vm: *VirtualMachine, comptime T: type, obj_type: ObjType) !*Obj {
+        const ptr = try vm.allocator.create(T);
+
+        ptr.obj = Obj{
+            .allocator = vm.allocator,
             .obj_type = obj_type,
+            .next = vm.objects,
         };
+
+        vm.objects = &ptr.obj;
+
+        return &ptr.obj;
     }
 
-    pub inline fn is_obj_type(self: *Obj, obj_type: ObjType) bool {
+    pub fn print(self: *Obj) void {
+        switch (self.obj_type) {
+            .Function => self.as(Function).print(),
+            .String => self.as(String).print(),
+        }
+    }
+
+    pub inline fn is(self: *Obj, obj_type: ObjType) bool {
         return self.obj_type == obj_type;
+    }
+
+    pub inline fn as(self: *Obj, comptime T: type) *T {
+        return @fieldParentPtr("obj", self);
     }
 };
 
 pub const Function = struct {
-    allocator: Allocator,
     obj: Obj,
     arity: usize,
     chunk: Chunk,
-    name: ?String,
+    name: ?*String,
 
-    pub fn init(allocator: Allocator) !Function {
-        return Function{
-            .allocator = allocator,
-            .obj = Obj.init(ObjType.Function),
+    pub fn init(vm: *VirtualMachine) !*Function {
+        const obj = try Obj.init(vm, Function, .Function);
+        const func = obj.as(Function);
+
+        func.* = Function{
+            .obj = obj.*,
             .arity = 0,
-            .chunk = Chunk.init(allocator),
+            .chunk = Chunk.init(vm.allocator),
             .name = null,
         };
+
+        return func;
     }
 
-    pub fn deinit(self: Function) void {
+    pub fn deinit(self: *Function, vm: *VirtualMachine) void {
         self.chunk.deinit();
+        vm.allocator.destroy(self);
+    }
 
-        if (self.name) |name| {
-            name.deinit();
-        }
+    pub inline fn as_obj(self: *Function) *Obj {
+        return @ptrCast(self);
     }
 
     pub fn print(self: *const Function) void {
@@ -68,33 +94,24 @@ pub const Function = struct {
 };
 
 pub const String = struct {
-    allocator: Allocator,
     obj: Obj,
     chars: []const u8,
 
-    pub fn init(allocator: Allocator, chars: []const u8, table: *std.StringHashMap(Value)) !String {
-        // For string interning.
-        // Return the stored strings if the char-array arg has been defined before.
-        var char_copy: []const u8 = undefined;
+    pub fn init(chars: []const u8, vm: *VirtualMachine) !*String {
+        const obj = try Obj.init(vm, String, .String);
+        const str = obj.as(String);
 
-        if (table.getKey(chars)) |key| {
-            char_copy = key;
-        } else {
-            // Automatically store a string in the VM's hashmap whenever one is allocated.
-            // This way it can be used later if the user allocates the same char-array.
-            char_copy = try allocator.dupe(u8, chars);
-            try table.put(char_copy, Value.nil());
-        }
+        str.* = String{ .obj = obj.*, .chars = chars };
 
-        return String{
-            .allocator = allocator,
-            .obj = Obj.init(ObjType.String),
-            .chars = char_copy,
-        };
+        return str;
     }
 
     pub fn deinit(self: String) void {
         self.allocator.free(self.chars);
+    }
+
+    pub inline fn as_obj(self: *String) *Obj {
+        return @ptrCast(self);
     }
 
     pub fn print(self: *const String) void {
@@ -110,22 +127,3 @@ pub const String = struct {
         return std.mem.eql(u8, self.chars, other.chars);
     }
 };
-
-test "string_init" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const allocator = arena.allocator();
-
-    var table = std.StringHashMap(Value).init(allocator);
-    defer table.deinit();
-
-    const str1 = try String.init(allocator, "Hello World!", &table);
-    defer str1.deinit();
-
-    const str2 = try String.init(allocator, str1.chars, &table);
-    defer str2.deinit();
-
-    try testing.expectEqual(true, str2.obj.obj_type == ObjType.String);
-    try testing.expect(std.mem.eql(u8, str1.chars, str2.chars));
-}
