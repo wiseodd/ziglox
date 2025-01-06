@@ -8,6 +8,8 @@ const flags = @import("flags.zig");
 const Parser = @import("compiler.zig").Parser;
 const Obj = @import("object.zig").Obj;
 const Function = @import("object.zig").Function;
+const NativeFn = @import("object.zig").NativeFn;
+const Native = @import("object.zig").Native;
 const String = @import("object.zig").String;
 
 const FRAMES_MAX: usize = 64;
@@ -30,7 +32,6 @@ pub const VirtualMachine = struct {
     frame_count: usize,
     stack: [STACK_MAX]Value,
     stack_top: [*]Value = undefined,
-    stack_top_idx: usize = 0,
     objects: ?*Obj, // Linked list of objects (funcs, strs, etc) created
     strings: std.StringHashMap(Value),
     globals: std.StringHashMap(Value),
@@ -267,12 +268,10 @@ pub const VirtualMachine = struct {
     fn push(self: *VirtualMachine, value: Value) InterpretError!void {
         self.stack_top[0] = value;
         self.stack_top += 1;
-        self.stack_top_idx += 1;
     }
 
     fn pop(self: *VirtualMachine) InterpretError!Value {
         self.stack_top -= 1;
-        self.stack_top_idx -= 1;
         return self.stack_top[0];
     }
 
@@ -297,15 +296,31 @@ pub const VirtualMachine = struct {
         var frame: *CallFrame = &self.frames[self.frame_count];
         frame.function = function;
         frame.ip = function.chunk.code.items.ptr;
+
         // This points to the last position in the stack before the current frame
-        frame.slots = self.stack_top - arg_count - 1;
+        // TODO: This is buggy!!
+        frame.slots = self.stack_top - arg_count;
+        // frame.slots = self.stack_top - arg_count - 1;
 
         self.frame_count += 1;
     }
 
     fn call_value(self: *VirtualMachine, callee: Value, arg_count: usize) InterpretError!void {
         if (callee.is_obj()) {
-            return try self.call(callee.Obj.as(Function), arg_count);
+            const obj = callee.Obj;
+
+            switch (obj.obj_type) {
+                .Function => return try self.call(obj.as(Function), arg_count),
+                .Native => {
+                    // const native_fn = obj.as(Native).function;
+                    // const result: Value = native_fn(arg_count, self.stack_top - arg_count);
+                    // self.stack_top -= arg_count + 1;
+                    // self.push(result);
+                    // return;
+                    @panic("todo");
+                },
+                else => {},
+            }
         }
 
         self.runtime_error("Can only call functions and classes.", .{});
@@ -337,9 +352,13 @@ pub const VirtualMachine = struct {
         self.reset_stack();
     }
 
+    // fn define_native(self: *VirtualMachine, name: []const u8, function: *const NativeFn) void {
+    //     // self.push(Valu)
+    //     @panic("todo");
+    // }
+
     pub fn reset_stack(self: *VirtualMachine) void {
         self.stack_top = self.stack[0..];
-        self.stack_top_idx = 0;
         self.frame_count = 0;
     }
 

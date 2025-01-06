@@ -7,6 +7,7 @@ const Chunk = @import("chunk.zig").Chunk;
 
 pub const ObjType = enum {
     Function,
+    Native,
     String,
 };
 
@@ -14,6 +15,9 @@ pub const FunctionType = enum {
     Function,
     Script,
 };
+
+// For function pointer to a native func
+pub const NativeFn = fn (usize, *Value) Value;
 
 pub const Obj = struct {
     allocator: Allocator,
@@ -40,6 +44,7 @@ pub const Obj = struct {
     pub fn print(self: *Obj) void {
         switch (self.obj_type) {
             .Function => self.as(Function).print(),
+            .Native => self.as(Native).print(),
             .String => self.as(String).print(),
         }
     }
@@ -99,6 +104,44 @@ pub const Function = struct {
     }
 
     pub fn println(self: *const Function) void {
+        self.print();
+        std.debug.print("\n", .{});
+    }
+};
+
+pub const Native = struct {
+    obj: Obj,
+    function: *const NativeFn,
+
+    /// The reason we do `ptr = allocator.create(T); ptr.* = ...` is so that
+    /// the newly initialized object lives in the heap. Otherwise, we will
+    /// have an undefined behavior (use-after-free).
+    pub fn init(function: *const NativeFn, vm: *VirtualMachine) !*Native {
+        const obj = try Obj.init(vm, Native, .Native);
+        const native = obj.as(Native);
+
+        native.* = Native{
+            .obj = obj.*,
+            .function = function,
+        };
+
+        return native;
+    }
+
+    pub fn deinit(self: *Native, vm: *VirtualMachine) void {
+        vm.allocator.destroy(self);
+    }
+
+    pub inline fn as_obj(self: *Native) *Obj {
+        return @ptrCast(self);
+    }
+
+    pub fn print(self: *const Native) void {
+        _ = self;
+        std.debug.print("<native fn>", .{});
+    }
+
+    pub fn println(self: *const Native) void {
         self.print();
         std.debug.print("\n", .{});
     }

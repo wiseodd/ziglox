@@ -93,6 +93,14 @@ pub const Value = union(enum) {
         };
     }
 
+    pub inline fn is_function(self: Value) bool {
+        return self.is_obj() and self.Obj.obj_type == .Function;
+    }
+
+    pub inline fn is_native(self: Value) bool {
+        return self.is_obj() and self.Obj.obj_type == .Native;
+    }
+
     pub inline fn is_string(self: Value) bool {
         return self.is_obj() and self.Obj.obj_type == .String;
     }

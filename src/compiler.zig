@@ -73,8 +73,8 @@ const Compiler = struct {
         return ptr;
     }
 
-    pub fn deinit(self: *Compiler) void {
-        self.locals.deinit();
+    pub fn deinit(self: *Compiler, vm: *VirtualMachine) void {
+        vm.allocator.destroy(self);
     }
 };
 
@@ -275,10 +275,13 @@ pub const Parser = struct {
     }
 
     fn fun(self: *Parser, fun_type: FunctionType) void {
-        self.current_compiler = Compiler.init(self.vm, fun_type, self.current_compiler) catch {
+        const compiler = Compiler.init(self.vm, fun_type, self.current_compiler) catch {
             self.err("Error allocating compiler.");
             return;
         };
+        defer compiler.deinit(self.vm);
+
+        self.current_compiler = compiler;
 
         if (fun_type != .Script) {
             self.current_compiler.function.name = String.init(
@@ -466,6 +469,8 @@ pub const Parser = struct {
             self.for_statement();
         } else if (self.match(TokenType.If)) {
             self.if_statement();
+        } else if (self.match(TokenType.Return)) {
+            self.return_statement();
         } else if (self.match(TokenType.While)) {
             self.while_statement();
         } else if (self.match(TokenType.LeftBrace)) {
@@ -481,6 +486,20 @@ pub const Parser = struct {
         self.expression();
         self.consume(TokenType.SemiColon, "Expect ';' after value.");
         self.emit_byte(@intFromEnum(OpCode.Print));
+    }
+
+    fn return_statement(self: *Parser) void {
+        if (self.current_compiler.fun_type == .Script) {
+            self.err("Can't return from top-level code.");
+        }
+
+        if (self.match(TokenType.SemiColon)) {
+            self.emit_return();
+        } else {
+            self.expression();
+            self.consume(TokenType.SemiColon, "Expect ';' after return value.");
+            self.emit_byte(@intFromEnum(OpCode.Return));
+        }
     }
 
     fn while_statement(self: *Parser) void {
