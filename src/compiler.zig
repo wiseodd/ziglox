@@ -70,6 +70,12 @@ const Compiler = struct {
             .scope_depth = 0,
         };
 
+        var local = ptr.locals[ptr.local_count];
+        ptr.local_count += 1;
+        local.maybe_depth = 0;
+        local.name.start = "";
+        local.name.length = 0;
+
         return ptr;
     }
 
@@ -156,20 +162,12 @@ pub const Parser = struct {
         vm: *VirtualMachine,
         source: []const u8,
     ) !Parser {
-        var parser = Parser{
+        return Parser{
             .vm = vm,
             .source = source,
             .scanner = Scanner.init(source),
             .current_compiler = try Compiler.init(vm, .Script, undefined),
         };
-
-        var local = &parser.current_compiler.locals[0];
-        parser.current_compiler.local_count += 1;
-        local.maybe_depth = 0;
-        local.name.start = "";
-        local.name.length = 0;
-
-        return parser;
     }
 
     pub fn compile(self: *Parser) InterpretError!*Function {
@@ -799,9 +797,9 @@ pub const Parser = struct {
 
         // Store local variable in the current compiler's storage.
         var local: *Local = &self.current_compiler.locals[self.current_compiler.local_count];
+        self.current_compiler.local_count += 1;
         local.name = name;
         local.maybe_depth = null;
-        self.current_compiler.local_count += 1;
     }
 
     fn define_variable(self: *Parser, global: u8) void {

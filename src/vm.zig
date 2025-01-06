@@ -61,6 +61,7 @@ pub const VirtualMachine = struct {
         var parser = Parser.init(self, source) catch {
             return InterpretError.CompileError;
         };
+
         const function = try parser.compile();
 
         // Put the top-level function into the call frame
@@ -84,8 +85,8 @@ pub const VirtualMachine = struct {
             if (flags.DEBUG_TRACE_EXECUTION) {
                 std.debug.print("          ", .{});
 
-                var val_ptr = self.stack_top - 1;
-                while (@intFromPtr(val_ptr) >= @intFromPtr(self.stack[0..])) : (val_ptr -= 1) {
+                var val_ptr = self.stack[0..].ptr;
+                while (@intFromPtr(val_ptr) < @intFromPtr(self.stack_top)) : (val_ptr += 1) {
                     std.debug.print("[ ", .{});
                     val_ptr[0].print();
                     std.debug.print(" ]", .{});
@@ -294,15 +295,11 @@ pub const VirtualMachine = struct {
         }
 
         var frame: *CallFrame = &self.frames[self.frame_count];
+        self.frame_count += 1;
         frame.function = function;
         frame.ip = function.chunk.code.items.ptr;
-
         // This points to the last position in the stack before the current frame
-        // TODO: This is buggy!!
-        frame.slots = self.stack_top - arg_count;
-        // frame.slots = self.stack_top - arg_count - 1;
-
-        self.frame_count += 1;
+        frame.slots = self.stack_top - arg_count - 1;
     }
 
     fn call_value(self: *VirtualMachine, callee: Value, arg_count: usize) InterpretError!void {
