@@ -7,6 +7,7 @@ const Chunk = @import("chunk.zig").Chunk;
 
 pub const ObjType = enum {
     Function,
+    Closure,
     Native,
     String,
 };
@@ -41,11 +42,21 @@ pub const Obj = struct {
         return &ptr.obj;
     }
 
+    pub fn deinit(self: *Obj, vm: *VirtualMachine) void {
+        switch (self.obj_type) {
+            .String => self.as(String).deinit(vm),
+            .Function => self.as(Function).deinit(vm),
+            .Closure => self.as(Closure).deinit(vm),
+            .Native => self.as(Native).deinit(vm),
+        }
+    }
+
     pub fn print(self: *Obj) void {
         switch (self.obj_type) {
-            .Function => self.as(Function).print(),
-            .Native => self.as(Native).print(),
             .String => self.as(String).print(),
+            .Function => self.as(Function).print(),
+            .Closure => self.as(Closure).print(),
+            .Native => self.as(Native).print(),
         }
     }
 
@@ -60,6 +71,51 @@ pub const Obj = struct {
 
     pub inline fn as(self: *Obj, comptime T: type) *T {
         return @fieldParentPtr("obj", self);
+    }
+};
+
+pub const String = struct {
+    obj: Obj,
+    chars: []const u8,
+
+    /// The reason we do `ptr = allocator.create(T); ptr.* = ...` is so that
+    /// the newly initialized object lives in the heap. Otherwise, we will
+    /// have an undefined behavior (use-after-free).
+    pub fn init(chars: []const u8, vm: *VirtualMachine) !*String {
+        const obj = try Obj.init(vm, String, .String);
+        const str = obj.as(String);
+
+        var chars_cpy = try vm.allocator.alloc(u8, chars.len);
+        @memcpy(chars_cpy[0..chars.len], chars);
+
+        str.* = String{
+            .obj = obj.*,
+            .chars = chars_cpy,
+        };
+
+        return str;
+    }
+
+    pub fn deinit(self: *String, vm: *VirtualMachine) void {
+        vm.allocator.free(self.chars);
+        vm.allocator.destroy(self);
+    }
+
+    pub inline fn as_obj(self: *String) *Obj {
+        return @ptrCast(self);
+    }
+
+    pub fn print(self: *const String) void {
+        std.debug.print("{s}", .{self.chars});
+    }
+
+    pub fn println(self: *const String) void {
+        self.print();
+        std.debug.print("\n", .{});
+    }
+
+    pub fn eq(self: *const String, other: *const String) bool {
+        return std.mem.eql(u8, self.chars, other.chars);
     }
 };
 
@@ -109,13 +165,45 @@ pub const Function = struct {
     }
 };
 
+pub const Closure = struct {
+    obj: Obj,
+    function: *Function,
+
+    pub fn init(function: *const Function, vm: *VirtualMachine) !*Closure {
+        const obj = try Obj.init(vm, Closure, .Closure);
+        const closure = obj.as(Closure);
+
+        closure.* = Closure{
+            .obj = obj.*,
+            .function = function,
+        };
+
+        return closure;
+    }
+
+    pub fn deinit(self: *Closure, vm: *VirtualMachine) void {
+        vm.allocator.destroy(self);
+    }
+
+    pub inline fn as_obj(self: *Closure) *Obj {
+        return @ptrCast(self);
+    }
+
+    pub fn print(self: *const Closure) void {
+        _ = self;
+        std.debug.print("<closure>", .{});
+    }
+
+    pub fn println(self: *const Closure) void {
+        self.print();
+        std.debug.print("\n", .{});
+    }
+};
+
 pub const Native = struct {
     obj: Obj,
     function: *const NativeFn,
 
-    /// The reason we do `ptr = allocator.create(T); ptr.* = ...` is so that
-    /// the newly initialized object lives in the heap. Otherwise, we will
-    /// have an undefined behavior (use-after-free).
     pub fn init(function: *const NativeFn, vm: *VirtualMachine) !*Native {
         const obj = try Obj.init(vm, Native, .Native);
         const native = obj.as(Native);
@@ -144,49 +232,5 @@ pub const Native = struct {
     pub fn println(self: *const Native) void {
         self.print();
         std.debug.print("\n", .{});
-    }
-};
-
-pub const String = struct {
-    obj: Obj,
-    chars: []const u8,
-
-    /// The reason we do `ptr = allocator.create(T); ptr.* = ...` is so that
-    /// the newly initialized object lives in the heap. Otherwise, we will
-    /// have an undefined behavior (use-after-free).
-    pub fn init(chars: []const u8, vm: *VirtualMachine) !*String {
-        const obj = try Obj.init(vm, String, .String);
-        const str = obj.as(String);
-
-        var chars_cpy = try vm.allocator.alloc(u8, chars.len);
-        @memcpy(chars_cpy[0..chars.len], chars);
-
-        str.* = String{
-            .obj = obj.*,
-            .chars = chars_cpy,
-        };
-
-        return str;
-    }
-
-    pub fn deinit(self: String) void {
-        self.allocator.free(self.chars);
-    }
-
-    pub inline fn as_obj(self: *String) *Obj {
-        return @ptrCast(self);
-    }
-
-    pub fn print(self: *const String) void {
-        std.debug.print("{s}", .{self.chars});
-    }
-
-    pub fn println(self: *const String) void {
-        self.print();
-        std.debug.print("\n", .{});
-    }
-
-    pub fn eq(self: *const String, other: *const String) bool {
-        return std.mem.eql(u8, self.chars, other.chars);
     }
 };

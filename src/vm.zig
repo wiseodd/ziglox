@@ -59,6 +59,14 @@ pub const VirtualMachine = struct {
     pub fn deinit(self: *VirtualMachine) void {
         self.strings.deinit();
         self.globals.deinit();
+
+        var maybe_obj = self.objects;
+
+        while (maybe_obj) |obj| {
+            const next = obj.next;
+            obj.*.deinit(self);
+            maybe_obj = next;
+        }
     }
 
     pub fn interpret(self: *VirtualMachine, source: []const u8) InterpretError!void {
@@ -369,7 +377,7 @@ pub const VirtualMachine = struct {
         _ = try self.pop();
     }
 
-    pub fn reset_stack(self: *VirtualMachine) void {
+    fn reset_stack(self: *VirtualMachine) void {
         self.stack_top = self.stack[0..];
         self.frame_count = 0;
     }
