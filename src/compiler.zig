@@ -248,7 +248,7 @@ pub const Parser = struct {
 
         // Clean up after the local scope.
         var curr: *Compiler = self.current_compiler;
-        while (curr.local_count > 0 and curr.locals[curr.local_count - 1].maybe_depth.? > curr.scope_depth) {
+        while (curr.local_count > 0 and curr.locals[curr.local_count - 1].maybe_depth != null and curr.locals[curr.local_count - 1].maybe_depth.? > curr.scope_depth) {
             // Emit instruction to pop all constants in the stack corresponding to
             // the ending scope.
             self.emit_byte(@intFromEnum(OpCode.Pop));
@@ -320,7 +320,7 @@ pub const Parser = struct {
 
         const function = self.end_compiler();
         const val = Value.obj(function.as_obj());
-        self.emit_bytes(@intFromEnum(OpCode.Constant), self.make_constant(val));
+        self.emit_bytes(@intFromEnum(OpCode.Closure), self.make_constant(val));
     }
 
     fn fun_declaration(self: *Parser) void {

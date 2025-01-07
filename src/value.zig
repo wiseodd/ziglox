@@ -97,6 +97,10 @@ pub const Value = union(enum) {
         return self.is_obj() and self.Obj.obj_type == .Function;
     }
 
+    pub inline fn is_closure(self: Value) bool {
+        return self.is_obj() and self.Obj.obj_type == .Closure;
+    }
+
     pub inline fn is_native(self: Value) bool {
         return self.is_obj() and self.Obj.obj_type == .Native;
     }

@@ -169,7 +169,7 @@ pub const Closure = struct {
     obj: Obj,
     function: *Function,
 
-    pub fn init(function: *const Function, vm: *VirtualMachine) !*Closure {
+    pub fn init(function: *Function, vm: *VirtualMachine) !*Closure {
         const obj = try Obj.init(vm, Closure, .Closure);
         const closure = obj.as(Closure);
 
@@ -190,8 +190,7 @@ pub const Closure = struct {
     }
 
     pub fn print(self: *const Closure) void {
-        _ = self;
-        std.debug.print("<closure>", .{});
+        self.function.print();
     }
 
     pub fn println(self: *const Closure) void {

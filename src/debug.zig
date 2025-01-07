@@ -50,6 +50,17 @@ pub fn disassemble_instruction(chunk: *Chunk, offset: usize) usize {
         OpCode.JumpIfFalse => return jump_instruction("OP_JUMP_IF_FALSE", 1, chunk, offset),
         OpCode.Loop => return jump_instruction("OP_LOOP", -1, chunk, offset),
         OpCode.Call => return byte_instruction("OP_CALL", chunk, offset),
+        OpCode.Closure => {
+            var i = offset;
+            i += 1;
+            const constant: u8 = chunk.code.items[i];
+            i += 1;
+
+            std.debug.print("{s:<16} {d:>4} ", .{ "OP_CLOSURE", constant });
+            chunk.constants.items[constant].println();
+
+            return i;
+        },
         OpCode.Return => return simple_instruction("OP_RETURN", offset),
     }
 }

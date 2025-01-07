@@ -8,6 +8,7 @@ const flags = @import("flags.zig");
 const Parser = @import("compiler.zig").Parser;
 const Obj = @import("object.zig").Obj;
 const Function = @import("object.zig").Function;
+const Closure = @import("object.zig").Closure;
 const NativeFn = @import("object.zig").NativeFn;
 const Native = @import("object.zig").Native;
 const String = @import("object.zig").String;
@@ -22,7 +23,7 @@ pub const InterpretError = error{
 };
 
 pub const CallFrame = struct {
-    function: *Function = undefined,
+    closure: *Closure = undefined,
     ip: [*]u8 = undefined,
     slots: [*]Value = undefined,
 };
@@ -79,8 +80,14 @@ pub const VirtualMachine = struct {
         // Put the top-level function into the call frame
         try self.push(Value.obj(function.as_obj()));
 
+        const closure = Closure.init(function, self) catch {
+            return InterpretError.RuntimeError;
+        };
+        _ = try self.pop();
+        try self.push(Value.obj(closure.as_obj()));
+
         // Call the top-level frame
-        try self.call(function, 0);
+        try self.call(closure, 0);
 
         try self.run();
     }
@@ -109,8 +116,8 @@ pub const VirtualMachine = struct {
                 // @intFromPtr converts a pointer to its usize address.
                 // Since arrays are contiguous, we can compute the distance from the
                 // first element.
-                const offset: usize = @intFromPtr(frame.ip) - @intFromPtr(frame.function.chunk.code.items.ptr);
-                _ = debug.disassemble_instruction(&frame.function.chunk, offset);
+                const offset: usize = @intFromPtr(frame.ip) - @intFromPtr(frame.closure.function.chunk.code.items.ptr);
+                _ = debug.disassemble_instruction(&frame.closure.function.chunk, offset);
             }
 
             const instruction: OpCode = @enumFromInt(self.read_byte(frame));
@@ -261,6 +268,14 @@ pub const VirtualMachine = struct {
                     frame = &self.frames[self.frame_count - 1];
                 },
 
+                OpCode.Closure => {
+                    const function = self.read_constant(frame).Obj.as(Function);
+                    const closure = Closure.init(function, self) catch {
+                        return InterpretError.RuntimeError;
+                    };
+                    try self.push(Value.obj(closure.as_obj()));
+                },
+
                 OpCode.Return => {
                     const result: Value = try self.pop();
                     self.frame_count -= 1;
@@ -292,11 +307,11 @@ pub const VirtualMachine = struct {
         return (self.stack_top - 1 - distance)[0];
     }
 
-    fn call(self: *VirtualMachine, function: *Function, arg_count: usize) InterpretError!void {
-        if (arg_count != function.arity) {
+    fn call(self: *VirtualMachine, closure: *Closure, arg_count: usize) InterpretError!void {
+        if (arg_count != closure.function.arity) {
             self.runtime_error(
                 "Expected {d} arguments but got {d}.",
-                .{ function.arity, arg_count },
+                .{ closure.function.arity, arg_count },
             );
             return InterpretError.RuntimeError;
         }
@@ -308,8 +323,8 @@ pub const VirtualMachine = struct {
 
         var frame: *CallFrame = &self.frames[self.frame_count];
         self.frame_count += 1;
-        frame.function = function;
-        frame.ip = function.chunk.code.items.ptr;
+        frame.closure = closure;
+        frame.ip = closure.function.chunk.code.items.ptr;
         // This points to the last position in the stack before the current frame
         frame.slots = self.stack_top - arg_count - 1;
     }
@@ -319,7 +334,7 @@ pub const VirtualMachine = struct {
             const obj = callee.Obj;
 
             switch (obj.obj_type) {
-                .Function => return try self.call(obj.as(Function), arg_count),
+                .Closure => return try self.call(obj.as(Closure), arg_count),
                 .Native => {
                     const native_fn = obj.as(Native).function;
                     const result: Value = native_fn(arg_count, self.stack_top[@intFromPtr(self.stack_top) - 1 - arg_count .. @intFromPtr(self.stack_top) - 1].ptr);
@@ -329,6 +344,7 @@ pub const VirtualMachine = struct {
                     };
                     return;
                 },
+
                 else => {},
             }
         }
@@ -348,7 +364,7 @@ pub const VirtualMachine = struct {
             i -= 1;
 
             const frame: CallFrame = self.frames[i];
-            const function = frame.function;
+            const function = frame.closure.function;
             const instruction: usize = @intFromPtr(frame.ip) - @intFromPtr(function.chunk.code.items.ptr);
             std.debug.print("[line {}] in ", .{function.chunk.lines.items[instruction]});
 
@@ -396,7 +412,7 @@ pub const VirtualMachine = struct {
     }
 
     inline fn read_constant(self: *VirtualMachine, frame: *CallFrame) Value {
-        return frame.function.chunk.constants.items[self.read_byte(frame)];
+        return frame.closure.function.chunk.constants.items[self.read_byte(frame)];
     }
 
     inline fn read_short(self: *VirtualMachine, frame: *CallFrame) usize {
