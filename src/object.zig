@@ -17,7 +17,7 @@ pub const FunctionType = enum {
 };
 
 // For function pointer to a native func
-pub const NativeFn = fn (usize, *Value) Value;
+pub const NativeFn = fn (usize, [*]Value) Value;
 
 pub const Obj = struct {
     allocator: Allocator,

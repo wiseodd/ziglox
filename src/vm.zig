@@ -11,6 +11,7 @@ const Function = @import("object.zig").Function;
 const NativeFn = @import("object.zig").NativeFn;
 const Native = @import("object.zig").Native;
 const String = @import("object.zig").String;
+const clock_native = @import("native.zig").clock_native;
 
 const FRAMES_MAX: usize = 64;
 const STACK_MAX: usize = FRAMES_MAX * std.math.maxInt(u8);
@@ -36,7 +37,7 @@ pub const VirtualMachine = struct {
     strings: std.StringHashMap(Value),
     globals: std.StringHashMap(Value),
 
-    pub fn init(allocator: std.mem.Allocator) *VirtualMachine {
+    pub fn init(allocator: std.mem.Allocator) !VirtualMachine {
         var vm = VirtualMachine{
             .allocator = allocator,
             .frames = undefined,
@@ -49,7 +50,10 @@ pub const VirtualMachine = struct {
 
         vm.reset_stack();
 
-        return &vm;
+        // Native functions
+        try vm.define_native("clock", clock_native);
+
+        return vm;
     }
 
     pub fn deinit(self: *VirtualMachine) void {
@@ -309,12 +313,13 @@ pub const VirtualMachine = struct {
             switch (obj.obj_type) {
                 .Function => return try self.call(obj.as(Function), arg_count),
                 .Native => {
-                    // const native_fn = obj.as(Native).function;
-                    // const result: Value = native_fn(arg_count, self.stack_top - arg_count);
-                    // self.stack_top -= arg_count + 1;
-                    // self.push(result);
-                    // return;
-                    @panic("todo");
+                    const native_fn = obj.as(Native).function;
+                    const result: Value = native_fn(arg_count, self.stack_top[@intFromPtr(self.stack_top) - 1 - arg_count .. @intFromPtr(self.stack_top) - 1].ptr);
+                    self.stack_top -= arg_count + 1;
+                    self.push(result) catch {
+                        return InterpretError.RuntimeError;
+                    };
+                    return;
                 },
                 else => {},
             }
@@ -349,10 +354,20 @@ pub const VirtualMachine = struct {
         self.reset_stack();
     }
 
-    // fn define_native(self: *VirtualMachine, name: []const u8, function: *const NativeFn) void {
-    //     // self.push(Valu)
-    //     @panic("todo");
-    // }
+    fn define_native(self: *VirtualMachine, name: []const u8, function: *const NativeFn) !void {
+        const name_str = try String.init(name, self);
+        try self.push(Value.obj(name_str.as_obj()));
+
+        const native = try Native.init(function, self);
+        const native_val = Value.obj(native.as_obj());
+        try self.push(native_val);
+
+        try self.globals.put(name, native_val);
+
+        // For GC later
+        _ = try self.pop();
+        _ = try self.pop();
+    }
 
     pub fn reset_stack(self: *VirtualMachine) void {
         self.stack_top = self.stack[0..];

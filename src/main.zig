@@ -13,7 +13,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    var vm = VirtualMachine.init(allocator);
+    var vm = try VirtualMachine.init(allocator);
     defer vm.deinit();
 
     // Command-line arguments
@@ -31,9 +31,9 @@ pub fn main() !void {
     }
 
     if (args.getSingleValue("FILE")) |f| {
-        try run_file(f, vm, allocator);
+        try run_file(f, &vm, allocator);
     } else {
-        try repl(vm, allocator);
+        try repl(&vm, allocator);
     }
 
     std.process.exit(0);
