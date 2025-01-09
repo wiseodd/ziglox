@@ -42,13 +42,20 @@ const Local = struct {
     maybe_depth: ?usize,
 };
 
+// Upvalue variables for closures
+const Upvalue = struct {
+    index: u8,
+    is_local: bool,
+};
+
 // Storage for local variables
 const Compiler = struct {
-    enclosing: *Compiler,
+    enclosing: ?*Compiler,
     function: *Function,
     fun_type: FunctionType,
     locals: [U8_COUNT]Local,
     local_count: usize,
+    upvalues: [U8_COUNT]Upvalue,
     scope_depth: usize,
 
     /// The reason we do `ptr = allocator.create(T); ptr.* = ...` is so that
@@ -57,7 +64,7 @@ const Compiler = struct {
     pub fn init(
         vm: *VirtualMachine,
         fun_type: FunctionType,
-        enclosing: *Compiler,
+        enclosing: ?*Compiler,
     ) !*Compiler {
         const ptr = try vm.allocator.create(Compiler);
 
@@ -67,6 +74,7 @@ const Compiler = struct {
             .fun_type = fun_type,
             .locals = undefined,
             .local_count = 0,
+            .upvalues = undefined,
             .scope_depth = 0,
         };
 
@@ -166,7 +174,7 @@ pub const Parser = struct {
             .vm = vm,
             .source = source,
             .scanner = Scanner.init(source),
-            .current_compiler = try Compiler.init(vm, .Script, undefined),
+            .current_compiler = try Compiler.init(vm, .Script, null),
         };
     }
 
@@ -233,8 +241,10 @@ pub const Parser = struct {
             }
         }
 
-        // Set the current compiler to the previous one in the stack
-        self.current_compiler = self.current_compiler.enclosing;
+        // Set the current compiler to the previous one in the stack, if any
+        if (self.current_compiler.enclosing) |enclosing| {
+            self.current_compiler = enclosing;
+        }
 
         return function;
     }
@@ -321,6 +331,11 @@ pub const Parser = struct {
         const function = self.end_compiler();
         const val = Value.obj(function.as_obj());
         self.emit_bytes(@intFromEnum(OpCode.Closure), self.make_constant(val));
+
+        for (compiler.upvalues[0..function.upvalue_count]) |upvalue| {
+            self.emit_byte(if (upvalue.is_local) 1 else 0);
+            self.emit_byte(upvalue.index);
+        }
     }
 
     fn fun_declaration(self: *Parser) void {
@@ -601,6 +616,10 @@ pub const Parser = struct {
             arg = the_arg;
             get_op = OpCode.GetLocal;
             set_op = OpCode.SetLocal;
+        } else if (self.resolve_upvalue(self.current_compiler, @constCast(&name))) |the_arg| {
+            arg = the_arg;
+            get_op = OpCode.GetUpvalue;
+            set_op = OpCode.SetUpvalue;
         } else {
             // Local variable not found. Must be global.
             arg = self.identifier_constant(@constCast(&name));
@@ -871,6 +890,44 @@ pub const Parser = struct {
         }
 
         // Not found
+        return null;
+    }
+
+    fn add_upvalue(self: *Parser, compiler: *Compiler, index: u8, is_local: bool) usize {
+        const upvalue_count = compiler.function.upvalue_count;
+
+        for (compiler.upvalues, 0..) |upvalue, i| {
+            if (upvalue.index == index and upvalue.is_local == is_local) {
+                return i;
+            }
+        }
+
+        if (upvalue_count == U8_COUNT) {
+            self.err("Too many closure variables in function.");
+            return 0;
+        }
+
+        compiler.upvalues[upvalue_count].is_local = is_local;
+        compiler.upvalues[upvalue_count].index = index;
+        compiler.function.upvalue_count += 1;
+
+        return upvalue_count;
+    }
+
+    fn resolve_upvalue(self: *Parser, compiler: *Compiler, name: *Token) ?usize {
+        if (compiler.enclosing == null) return null;
+
+        // Check if the variable is local
+        if (self.resolve_local(compiler, name)) |local| {
+            return self.add_upvalue(compiler, @intCast(local), true);
+        }
+
+        // Recursively check the variable in the outer scope
+        if (self.resolve_upvalue(compiler, name)) |upvalue| {
+            return self.add_upvalue(compiler, @intCast(upvalue), false);
+        }
+
+        // If not found, the variable is global
         return null;
     }
 

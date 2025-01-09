@@ -10,6 +10,7 @@ pub const ObjType = enum {
     Closure,
     Native,
     String,
+    Upvalue,
 };
 
 pub const FunctionType = enum {
@@ -48,6 +49,7 @@ pub const Obj = struct {
             .Function => self.as(Function).deinit(vm),
             .Closure => self.as(Closure).deinit(vm),
             .Native => self.as(Native).deinit(vm),
+            .Upvalue => self.as(Upvalue).deinit(vm),
         }
     }
 
@@ -57,6 +59,7 @@ pub const Obj = struct {
             .Function => self.as(Function).print(),
             .Closure => self.as(Closure).print(),
             .Native => self.as(Native).print(),
+            .Upvalue => self.as(Upvalue).print(),
         }
     }
 
@@ -122,6 +125,7 @@ pub const String = struct {
 pub const Function = struct {
     obj: Obj,
     arity: usize,
+    upvalue_count: usize,
     chunk: Chunk,
     name: ?*String,
 
@@ -135,6 +139,7 @@ pub const Function = struct {
         func.* = Function{
             .obj = obj.*,
             .arity = 0,
+            .upvalue_count = 0,
             .chunk = Chunk.init(vm.allocator),
             .name = null,
         };
@@ -160,40 +165,6 @@ pub const Function = struct {
     }
 
     pub fn println(self: *const Function) void {
-        self.print();
-        std.debug.print("\n", .{});
-    }
-};
-
-pub const Closure = struct {
-    obj: Obj,
-    function: *Function,
-
-    pub fn init(function: *Function, vm: *VirtualMachine) !*Closure {
-        const obj = try Obj.init(vm, Closure, .Closure);
-        const closure = obj.as(Closure);
-
-        closure.* = Closure{
-            .obj = obj.*,
-            .function = function,
-        };
-
-        return closure;
-    }
-
-    pub fn deinit(self: *Closure, vm: *VirtualMachine) void {
-        vm.allocator.destroy(self);
-    }
-
-    pub inline fn as_obj(self: *Closure) *Obj {
-        return @ptrCast(self);
-    }
-
-    pub fn print(self: *const Closure) void {
-        self.function.print();
-    }
-
-    pub fn println(self: *const Closure) void {
         self.print();
         std.debug.print("\n", .{});
     }
@@ -229,6 +200,85 @@ pub const Native = struct {
     }
 
     pub fn println(self: *const Native) void {
+        self.print();
+        std.debug.print("\n", .{});
+    }
+};
+
+pub const Closure = struct {
+    obj: Obj,
+    upvalues: []?*Upvalue,
+    upvalue_count: usize,
+    function: *Function,
+
+    pub fn init(function: *Function, vm: *VirtualMachine) !*Closure {
+        const upvalues = try vm.allocator.alloc(?*Upvalue, function.upvalue_count);
+        for (upvalues) |*upvalue| {
+            upvalue.* = null;
+        }
+
+        const obj = try Obj.init(vm, Closure, .Closure);
+        const closure = obj.as(Closure);
+
+        closure.* = Closure{
+            .obj = obj.*,
+            .function = function,
+            .upvalues = upvalues,
+            .upvalue_count = function.upvalue_count,
+        };
+
+        return closure;
+    }
+
+    pub fn deinit(self: *Closure, vm: *VirtualMachine) void {
+        vm.allocator.free(self.upvalues);
+        vm.allocator.destroy(self);
+    }
+
+    pub inline fn as_obj(self: *Closure) *Obj {
+        return @ptrCast(self);
+    }
+
+    pub fn print(self: *const Closure) void {
+        self.function.print();
+    }
+
+    pub fn println(self: *const Closure) void {
+        self.print();
+        std.debug.print("\n", .{});
+    }
+};
+
+pub const Upvalue = struct {
+    obj: Obj,
+    location: *Value,
+
+    pub fn init(slot: *Value, vm: *VirtualMachine) !*Upvalue {
+        const obj = try Obj.init(vm, Upvalue, .Upvalue);
+        const upvalue = obj.as(Upvalue);
+
+        upvalue.* = Upvalue{
+            .obj = obj.*,
+            .location = slot,
+        };
+
+        return upvalue;
+    }
+
+    pub fn deinit(self: *Upvalue, vm: *VirtualMachine) void {
+        vm.allocator.destroy(self);
+    }
+
+    pub inline fn as_obj(self: *Upvalue) *Obj {
+        return @ptrCast(self);
+    }
+
+    pub fn print(self: *const Upvalue) void {
+        _ = self;
+        return;
+    }
+
+    pub fn println(self: *const Upvalue) void {
         self.print();
         std.debug.print("\n", .{});
     }

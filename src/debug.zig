@@ -2,6 +2,7 @@ const std = @import("std");
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("chunk.zig").OpCode;
 const Value = @import("value.zig").Value;
+const Function = @import("object.zig").Function;
 
 pub fn disasemble_chunk(chunk: *Chunk, name: []const u8) void {
     std.debug.print("== {s} ==\n", .{name});
@@ -35,6 +36,8 @@ pub fn disassemble_instruction(chunk: *Chunk, offset: usize) usize {
         OpCode.GetGlobal => return constant_instruction("OP_GET_GLOBAL", chunk, offset),
         OpCode.DefineGlobal => return constant_instruction("OP_DEFINE_GLOBAL", chunk, offset),
         OpCode.SetGlobal => return constant_instruction("OP_SET_GLOBAL", chunk, offset),
+        OpCode.GetUpvalue => return byte_instruction("OP_GET_UPVALUE", chunk, offset),
+        OpCode.SetUpvalue => return byte_instruction("OP_SET_UPVALUE", chunk, offset),
         OpCode.Equal => return simple_instruction("OP_EQUAL", offset),
         OpCode.Pop => return simple_instruction("OP_POP", offset),
         OpCode.Greater => return simple_instruction("OP_GREATER", offset),
@@ -58,6 +61,19 @@ pub fn disassemble_instruction(chunk: *Chunk, offset: usize) usize {
 
             std.debug.print("{s:<16} {d:>4} ", .{ "OP_CLOSURE", constant });
             chunk.constants.items[constant].println();
+
+            const function = chunk.constants.items[constant].Obj.as(Function);
+            for (0..function.upvalue_count) |_| {
+                const is_local: u8 = chunk.code.items[i];
+                i += 1;
+                const index: u8 = chunk.code.items[i];
+                i += 1;
+
+                std.debug.print(
+                    "{d:>4}      |                     {s} {d}\n",
+                    .{ offset - 2, if (is_local != 0) "local" else "upvalue", index },
+                );
+            }
 
             return i;
         },

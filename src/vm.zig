@@ -12,6 +12,7 @@ const Closure = @import("object.zig").Closure;
 const NativeFn = @import("object.zig").NativeFn;
 const Native = @import("object.zig").Native;
 const String = @import("object.zig").String;
+const Upvalue = @import("object.zig").Upvalue;
 const clock_native = @import("native.zig").clock_native;
 
 const FRAMES_MAX: usize = 64;
@@ -138,6 +139,16 @@ pub const VirtualMachine = struct {
                     const b = try self.pop();
                     const a = try self.pop();
                     try self.push(Value.boolean(a.equals(b)));
+                },
+
+                OpCode.GetUpvalue => {
+                    const slot = self.read_byte(frame);
+                    try self.push(frame.closure.upvalues[slot].?.location.*);
+                },
+
+                OpCode.SetUpvalue => {
+                    const slot = self.read_byte(frame);
+                    frame.closure.upvalues[slot].?.location.* = self.peek(0);
                 },
 
                 OpCode.Pop => _ = try self.pop(),
@@ -274,6 +285,17 @@ pub const VirtualMachine = struct {
                         return InterpretError.RuntimeError;
                     };
                     try self.push(Value.obj(closure.as_obj()));
+
+                    for (closure.upvalues) |*upvalue| {
+                        const is_local = self.read_byte(frame);
+                        const index = self.read_byte(frame);
+
+                        if (is_local != 0) {
+                            upvalue.* = try self.capture_upvalue(&frame.slots[@intCast(index)]);
+                        } else {
+                            upvalue.* = frame.closure.upvalues[index];
+                        }
+                    }
                 },
 
                 OpCode.Return => {
@@ -351,6 +373,13 @@ pub const VirtualMachine = struct {
 
         self.runtime_error("Can only call functions and classes.", .{});
         return InterpretError.RuntimeError;
+    }
+
+    fn capture_upvalue(self: *VirtualMachine, local: *Value) InterpretError!*Upvalue {
+        const created_upvalue = Upvalue.init(local, self) catch {
+            return InterpretError.RuntimeError;
+        };
+        return created_upvalue;
     }
 
     fn runtime_error(self: *VirtualMachine, comptime format: []const u8, args: anytype) void {

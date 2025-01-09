@@ -93,6 +93,10 @@ pub const Value = union(enum) {
         };
     }
 
+    pub inline fn is_string(self: Value) bool {
+        return self.is_obj() and self.Obj.obj_type == .String;
+    }
+
     pub inline fn is_function(self: Value) bool {
         return self.is_obj() and self.Obj.obj_type == .Function;
     }
@@ -105,8 +109,8 @@ pub const Value = union(enum) {
         return self.is_obj() and self.Obj.obj_type == .Native;
     }
 
-    pub inline fn is_string(self: Value) bool {
-        return self.is_obj() and self.Obj.obj_type == .String;
+    pub inline fn is_upvalue(self: Value) bool {
+        return self.is_obj() and self.Obj.obj_type == .Upvalue;
     }
 
     pub inline fn is_nil(self: Value) bool {
