@@ -1,2 +1,10 @@
-var i = 0;
-for (; i < 2; i = i + 1) print i;
+fun a() { 
+  print "hello"; 
+  b(); 
+}
+
+fun b() {
+  print "hey";
+}
+
+a();

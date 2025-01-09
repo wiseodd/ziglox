@@ -915,16 +915,16 @@ pub const Parser = struct {
     }
 
     fn resolve_upvalue(self: *Parser, compiler: *Compiler, name: *Token) ?usize {
-        if (compiler.enclosing == null) return null;
+        if (compiler.enclosing) |enclosing| {
+            // Check if the variable is local
+            if (self.resolve_local(enclosing, name)) |local| {
+                return self.add_upvalue(compiler, @intCast(local), true);
+            }
 
-        // Check if the variable is local
-        if (self.resolve_local(compiler, name)) |local| {
-            return self.add_upvalue(compiler, @intCast(local), true);
-        }
-
-        // Recursively check the variable in the outer scope
-        if (self.resolve_upvalue(compiler, name)) |upvalue| {
-            return self.add_upvalue(compiler, @intCast(upvalue), false);
+            // Recursively check the variable in the outer scope
+            if (self.resolve_upvalue(enclosing, name)) |upvalue| {
+                return self.add_upvalue(compiler, @intCast(upvalue), false);
+            }
         }
 
         // If not found, the variable is global
