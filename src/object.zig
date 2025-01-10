@@ -4,6 +4,8 @@ const Allocator = std.mem.Allocator;
 const VirtualMachine = @import("vm.zig").VirtualMachine;
 const Value = @import("value.zig").Value;
 const Chunk = @import("chunk.zig").Chunk;
+const flags = @import("flags.zig");
+const mem = @import("memory.zig");
 
 pub const ObjType = enum {
     Function,
@@ -22,28 +24,40 @@ pub const FunctionType = enum {
 pub const NativeFn = fn (usize, [*]Value) Value;
 
 pub const Obj = struct {
-    allocator: Allocator,
     obj_type: ObjType,
     next: ?*Obj,
+    is_marked: bool,
 
     /// The reason we do `ptr = allocator.create(T); ptr.* = ...` is so that
     /// the newly initialized object lives in the heap. Otherwise, we will
     /// have an undefined behavior (use-after-free).
     pub fn init(vm: *VirtualMachine, comptime T: type, obj_type: ObjType) !*Obj {
+        if (flags.DEBUG_STRESS_GC) {
+            mem.collect_garbage(vm);
+        }
+
         const ptr = try vm.allocator.create(T);
 
         ptr.obj = Obj{
-            .allocator = vm.allocator,
             .obj_type = obj_type,
             .next = vm.objects,
+            .is_marked = false,
         };
 
         vm.objects = &ptr.obj;
+
+        if (flags.DEBUG_LOG_GC) {
+            std.debug.print("{*} allocate {d} for {s}\n", .{ &ptr.obj, @sizeOf(T), @tagName(obj_type) });
+        }
 
         return &ptr.obj;
     }
 
     pub fn deinit(self: *Obj, vm: *VirtualMachine) void {
+        if (flags.DEBUG_LOG_GC) {
+            std.debug.print("{*} free type {s}\n", .{ self, @tagName(self.obj_type) });
+        }
+
         switch (self.obj_type) {
             .String => self.as(String).deinit(vm),
             .Function => self.as(Function).deinit(vm),

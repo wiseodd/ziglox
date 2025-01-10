@@ -23,11 +23,21 @@ pub fn main() !void {
     var myapp = app.rootCommand();
     try myapp.addArg(Arg.positional("FILE", null, null));
     try myapp.addArg(Arg.booleanOption("debug", 'd', null));
+    try myapp.addArg(Arg.booleanOption("debug-gc", 'g', null));
+    try myapp.addArg(Arg.booleanOption("stress-gc", 's', null));
     const args = try app.parseProcess();
 
-    if (args.containsArg("debug")) {
+    if (args.containsArg("debug-code")) {
         flags.DEBUG_PRINT_CODE = true;
         flags.DEBUG_TRACE_EXECUTION = true;
+    }
+
+    if (args.containsArg("debug-gc")) {
+        flags.DEBUG_LOG_GC = true;
+    }
+
+    if (args.containsArg("stress-gc")) {
+        flags.DEBUG_STRESS_GC = true;
     }
 
     if (args.getSingleValue("FILE")) |f| {
@@ -35,8 +45,6 @@ pub fn main() !void {
     } else {
         try repl(&vm, allocator);
     }
-
-    std.process.exit(0);
 }
 
 fn repl(vm: *VirtualMachine, allocator: std.mem.Allocator) !void {

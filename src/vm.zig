@@ -31,6 +31,7 @@ pub const CallFrame = struct {
 
 pub const VirtualMachine = struct {
     allocator: std.mem.Allocator,
+    parser: *Parser,
     frames: [FRAMES_MAX]CallFrame,
     frame_count: usize,
     stack: [STACK_MAX]Value,
@@ -43,6 +44,7 @@ pub const VirtualMachine = struct {
     pub fn init(allocator: std.mem.Allocator) !VirtualMachine {
         var vm = VirtualMachine{
             .allocator = allocator,
+            .parser = undefined,
             .frames = undefined,
             .frame_count = 0,
             .stack = undefined,
@@ -77,8 +79,9 @@ pub const VirtualMachine = struct {
         var parser = Parser.init(self, source) catch {
             return InterpretError.CompileError;
         };
+        self.parser = &parser;
 
-        const function = try parser.compile();
+        const function = try self.parser.compile();
 
         // Put the top-level function into the call frame
         try self.push(Value.obj(function.as_obj()));
