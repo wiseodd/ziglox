@@ -77,6 +77,7 @@ pub fn disassemble_instruction(chunk: *Chunk, offset: usize) usize {
 
             return i;
         },
+        OpCode.CloseUpvalue => return simple_instruction("OP_CLOSE_UPVALUE", offset),
         OpCode.Return => return simple_instruction("OP_RETURN", offset),
     }
 }

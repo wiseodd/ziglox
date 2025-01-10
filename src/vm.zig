@@ -36,6 +36,7 @@ pub const VirtualMachine = struct {
     stack: [STACK_MAX]Value,
     stack_top: [*]Value = undefined,
     objects: ?*Obj, // Linked list of objects (funcs, strs, etc) created
+    open_upvalues: ?*Upvalue,
     strings: std.StringHashMap(Value),
     globals: std.StringHashMap(Value),
 
@@ -46,6 +47,7 @@ pub const VirtualMachine = struct {
             .frame_count = 0,
             .stack = undefined,
             .objects = null,
+            .open_upvalues = null,
             .strings = std.StringHashMap(Value).init(allocator),
             .globals = std.StringHashMap(Value).init(allocator),
         };
@@ -298,8 +300,14 @@ pub const VirtualMachine = struct {
                     }
                 },
 
+                OpCode.CloseUpvalue => {
+                    self.close_upvalue(@ptrCast(self.stack_top - 1));
+                    _ = try self.pop();
+                },
+
                 OpCode.Return => {
                     const result: Value = try self.pop();
+                    self.close_upvalue(@ptrCast(frame.slots));
                     self.frame_count -= 1;
 
                     if (self.frame_count == 0) {
@@ -376,10 +384,54 @@ pub const VirtualMachine = struct {
     }
 
     fn capture_upvalue(self: *VirtualMachine, local: *Value) InterpretError!*Upvalue {
+        var prev_upvalue: ?*Upvalue = null;
+        var maybe_upvalue: ?*Upvalue = self.open_upvalues;
+
+        // Search open upvalues linked list
+        while (maybe_upvalue) |upvalue| {
+            if (@intFromPtr(upvalue.location) <= @intFromPtr(local)) {
+                break;
+            }
+
+            prev_upvalue = upvalue;
+            maybe_upvalue = upvalue.next;
+        }
+
+        // Found
+        if (maybe_upvalue) |upvalue| {
+            if (upvalue.location == local) {
+                return upvalue;
+            }
+        }
+
+        // If not found, insert local as a new element in the list
         const created_upvalue = Upvalue.init(local, self) catch {
             return InterpretError.RuntimeError;
         };
+        created_upvalue.next = maybe_upvalue;
+
+        // Insert to the open upvalues linked list
+        if (prev_upvalue) |prev| {
+            prev.next = created_upvalue;
+        } else {
+            self.open_upvalues = created_upvalue;
+        }
+
         return created_upvalue;
+    }
+
+    fn close_upvalue(self: *VirtualMachine, last: *Value) void {
+        while (self.open_upvalues) |upvalue| {
+            if (@intFromPtr(upvalue.location) < @intFromPtr(last)) {
+                break;
+            }
+
+            // Close the upvalue: move it to the heap and refer to its loc
+            upvalue.closed = upvalue.location.*;
+            upvalue.location = &upvalue.closed;
+
+            self.open_upvalues = upvalue.next;
+        }
     }
 
     fn runtime_error(self: *VirtualMachine, comptime format: []const u8, args: anytype) void {

@@ -40,6 +40,7 @@ const Local = struct {
     name: Token,
     // Null depth means the local var is uninitialized.
     maybe_depth: ?usize,
+    is_captured: bool,
 };
 
 // Upvalue variables for closures
@@ -81,6 +82,7 @@ const Compiler = struct {
         var local = ptr.locals[ptr.local_count];
         ptr.local_count += 1;
         local.maybe_depth = 0;
+        local.is_captured = false;
         local.name.start = "";
         local.name.length = 0;
 
@@ -261,7 +263,11 @@ pub const Parser = struct {
         while (curr.local_count > 0 and curr.locals[curr.local_count - 1].maybe_depth != null and curr.locals[curr.local_count - 1].maybe_depth.? > curr.scope_depth) {
             // Emit instruction to pop all constants in the stack corresponding to
             // the ending scope.
-            self.emit_byte(@intFromEnum(OpCode.Pop));
+            if (curr.locals[curr.local_count - 1].is_captured) {
+                self.emit_byte(@intFromEnum(OpCode.CloseUpvalue));
+            } else {
+                self.emit_byte(@intFromEnum(OpCode.Pop));
+            }
 
             // Reduce the number of local variables stored in the compiler.
             curr.local_count -= 1;
@@ -819,6 +825,7 @@ pub const Parser = struct {
         self.current_compiler.local_count += 1;
         local.name = name;
         local.maybe_depth = null;
+        local.is_captured = false;
     }
 
     fn define_variable(self: *Parser, global: u8) void {
@@ -918,6 +925,7 @@ pub const Parser = struct {
         if (compiler.enclosing) |enclosing| {
             // Check if the variable is local
             if (self.resolve_local(enclosing, name)) |local| {
+                enclosing.locals[local].is_captured = true;
                 return self.add_upvalue(compiler, @intCast(local), true);
             }
 

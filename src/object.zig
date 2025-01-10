@@ -252,6 +252,8 @@ pub const Closure = struct {
 pub const Upvalue = struct {
     obj: Obj,
     location: *Value,
+    next: ?*Upvalue,
+    closed: Value,
 
     pub fn init(slot: *Value, vm: *VirtualMachine) !*Upvalue {
         const obj = try Obj.init(vm, Upvalue, .Upvalue);
@@ -260,6 +262,8 @@ pub const Upvalue = struct {
         upvalue.* = Upvalue{
             .obj = obj.*,
             .location = slot,
+            .next = null,
+            .closed = Value.nil(),
         };
 
         return upvalue;
