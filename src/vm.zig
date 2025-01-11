@@ -41,6 +41,8 @@ pub const VirtualMachine = struct {
     strings: std.StringHashMap(Value),
     globals: std.StringHashMap(Value),
     gray_stack: std.ArrayList(*Obj),
+    bytes_allocated: usize,
+    next_gc: usize,
 
     pub fn init(allocator: std.mem.Allocator) !VirtualMachine {
         var vm = VirtualMachine{
@@ -54,6 +56,8 @@ pub const VirtualMachine = struct {
             .strings = std.StringHashMap(Value).init(allocator),
             .globals = std.StringHashMap(Value).init(allocator),
             .gray_stack = std.ArrayList(*Obj).init(allocator),
+            .bytes_allocated = 0,
+            .next_gc = 1024 * 1024,
         };
 
         vm.reset_stack();
@@ -99,6 +103,16 @@ pub const VirtualMachine = struct {
         try self.call(closure, 0);
 
         try self.run();
+    }
+
+    pub fn push(self: *VirtualMachine, value: Value) InterpretError!void {
+        self.stack_top[0] = value;
+        self.stack_top += 1;
+    }
+
+    pub fn pop(self: *VirtualMachine) InterpretError!Value {
+        self.stack_top -= 1;
+        return self.stack_top[0];
     }
 
     fn run(self: *VirtualMachine) InterpretError!void {
@@ -209,8 +223,10 @@ pub const VirtualMachine = struct {
 
                 OpCode.Add => {
                     if (self.peek(0).is_string() and self.peek(1).is_string()) {
-                        const str2: []const u8 = (try self.pop()).Obj.as(String).chars;
-                        const str1: []const u8 = (try self.pop()).Obj.as(String).chars;
+                        // Use peek instead of pop to keep the strings in the stack
+                        // so that the GC won't free them.
+                        const str2: []const u8 = self.peek(0).Obj.as(String).chars;
+                        const str1: []const u8 = self.peek(1).Obj.as(String).chars;
 
                         var res_chars = self.allocator.alloc(u8, str1.len + str2.len) catch {
                             return InterpretError.RuntimeError;
@@ -220,6 +236,10 @@ pub const VirtualMachine = struct {
                         const res_str = String.init(res_chars, self) catch {
                             return InterpretError.RuntimeError;
                         };
+
+                        // Now we can safely pop
+                        _ = try self.pop();
+                        _ = try self.pop();
 
                         try self.push(Value.obj(res_str.as_obj()));
                     } else if (self.peek(0).is_number() and self.peek(1).is_number()) {
@@ -327,16 +347,6 @@ pub const VirtualMachine = struct {
                 },
             }
         }
-    }
-
-    fn push(self: *VirtualMachine, value: Value) InterpretError!void {
-        self.stack_top[0] = value;
-        self.stack_top += 1;
-    }
-
-    fn pop(self: *VirtualMachine) InterpretError!Value {
-        self.stack_top -= 1;
-        return self.stack_top[0];
     }
 
     fn peek(self: *VirtualMachine, distance: usize) Value {
@@ -466,6 +476,7 @@ pub const VirtualMachine = struct {
     }
 
     fn define_native(self: *VirtualMachine, name: []const u8, function: *const NativeFn) !void {
+        // Push then pop immediately so that the GC keeps them alive
         const name_str = try String.init(name, self);
         try self.push(Value.obj(name_str.as_obj()));
 
@@ -475,7 +486,6 @@ pub const VirtualMachine = struct {
 
         try self.globals.put(name, native_val);
 
-        // For GC later
         _ = try self.pop();
         _ = try self.pop();
     }

@@ -9,6 +9,8 @@ const ValueError = error{
     CastError,
 };
 
+pub const ValueArray = std.ArrayList(Value);
+
 pub const Value = union(enum) {
     Bool: bool,
     Number: f64,
@@ -120,5 +122,3 @@ pub const Value = union(enum) {
         };
     }
 };
-
-pub const ValueArray = std.ArrayList(Value);

@@ -987,8 +987,20 @@ pub const Parser = struct {
     }
 
     fn make_constant(self: *Parser, value: Value) u8 {
+        // Together with the pop below, making the value visible to the GC ---
+        // to make sure it doesn't get freed by the GC.
+        self.vm.push(value) catch {
+            self.err("Error push constant to the stack.");
+            return 0;
+        };
+
         const idx: usize = self.current_chunk().add_constant(value) catch {
             self.err("Too many constants in one chunk.");
+            return 0;
+        };
+
+        _ = self.vm.pop() catch {
+            self.err("Error popping constant from the stack.");
             return 0;
         };
 

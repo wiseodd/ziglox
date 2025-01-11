@@ -10,16 +10,28 @@ const Closure = @import("object.zig").Closure;
 const Parser = @import("compiler.zig").Parser;
 const Compiler = @import("compiler.zig").Compiler;
 
+const GC_HEAP_GROW_FACTOR: usize = 2;
+
 pub fn collect_garbage(vm: *VirtualMachine) void {
+    var size_before: usize = undefined;
+
     if (flags.DEBUG_LOG_GC) {
         std.debug.print("-- gc begin\n", .{});
+        size_before = vm.bytes_allocated;
     }
 
     mark_roots(vm);
     trace_references(vm);
+    // sweep(vm); // TODO: Buggy!
+
+    vm.next_gc = vm.bytes_allocated * GC_HEAP_GROW_FACTOR;
 
     if (flags.DEBUG_LOG_GC) {
         std.debug.print("-- gc end\n", .{});
+        std.debug.print(
+            "   collected {} bytes (from {} to {}), next at {}\n",
+            .{ size_before - vm.bytes_allocated, size_before, vm.bytes_allocated, vm.next_gc },
+        );
     }
 }
 
@@ -77,15 +89,16 @@ fn mark_object(maybe_obj: ?*Obj) void {
     }
 }
 
-fn mark_array(array: *ValueArray) void {
-    for (array.items) |value| {
+fn mark_array(array: []Value) void {
+    for (array) |value| {
         mark_value(value);
     }
 }
 
 fn trace_references(vm: *VirtualMachine) void {
-    while (vm.gray_stack.popOrNull()) |object| {
-        blacken_object(object);
+    while (vm.gray_stack.items.len > 0) {
+        const obj = vm.gray_stack.pop();
+        blacken_object(obj);
     }
 }
 
@@ -99,17 +112,48 @@ fn blacken_object(obj: *Obj) void {
         .Upvalue => mark_value(obj.as(Upvalue).closed),
         .Function => {
             const function = obj.as(Function);
-            mark_object(if (function.name) |name| name.as_obj() else null);
-            mark_array(&function.chunk.constants);
+            if (function.name) |name| mark_object(name.as_obj());
+            mark_array(function.chunk.constants.items);
         },
         .Closure => {
             const closure = obj.as(Closure);
             mark_object(closure.function.as_obj());
 
-            for (closure.upvalues) |maybe_upvalue| {
-                mark_object(if (maybe_upvalue) |upvalue| upvalue.as_obj() else null);
+            for (closure.upvalues[0..closure.upvalue_count]) |maybe_upvalue| {
+                if (maybe_upvalue) |upvalue| {
+                    mark_object(upvalue.as_obj());
+                }
             }
         },
-        else => return,
+        else => {},
+    }
+}
+
+fn sweep(vm: *VirtualMachine) void {
+    var maybe_prev: ?*Obj = null;
+    var maybe_obj: ?*Obj = vm.objects;
+
+    while (maybe_obj) |obj| {
+        if (obj.is_marked) {
+            // Remove the color for the next time we do GC
+            obj.is_marked = false;
+
+            // Ignore marked -- reachable
+            maybe_prev = obj;
+            maybe_obj = obj.next;
+        } else {
+            const unreached = obj;
+
+            // Unlink obj from the objects linked list
+            maybe_obj = obj.next;
+            if (maybe_prev) |prev| {
+                prev.next = maybe_obj;
+            } else {
+                vm.objects = maybe_obj;
+            }
+
+            // Free up the unreachable obj
+            unreached.deinit(vm);
+        }
     }
 }
