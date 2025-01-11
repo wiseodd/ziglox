@@ -13,7 +13,6 @@ const ObjType = @import("object.zig").ObjType;
 const Function = @import("object.zig").Function;
 const FunctionType = @import("object.zig").FunctionType;
 const String = @import("object.zig").String;
-const mem = @import("memory.zig");
 const FLAGS = @import("flags.zig");
 const debug = @import("debug.zig");
 
@@ -51,7 +50,7 @@ const Upvalue = struct {
 };
 
 // Storage for local variables
-const Compiler = struct {
+pub const Compiler = struct {
     enclosing: ?*Compiler,
     function: *Function,
     fun_type: FunctionType,
@@ -117,7 +116,7 @@ pub const Parser = struct {
     vm: *VirtualMachine,
     source: []const u8,
     scanner: Scanner,
-    current_compiler: *Compiler = undefined,
+    current_compiler: *Compiler,
     local: *Local = undefined,
     current: Token = undefined,
     previous: Token = undefined,
@@ -194,13 +193,6 @@ pub const Parser = struct {
             return InterpretError.CompileError;
         } else {
             return function;
-        }
-    }
-
-    pub fn mark_compiler_roots(self: *Parser) void {
-        var maybe_compiler: ?*Compiler = self.current_compiler;
-        while (maybe_compiler) |compiler| : (maybe_compiler = compiler.enclosing) {
-            mem.mark_object(compiler.function.as_obj());
         }
     }
 

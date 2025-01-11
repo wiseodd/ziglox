@@ -45,7 +45,7 @@ fn mark_roots(vm: *VirtualMachine) void {
     }
 
     mark_table(&vm.globals);
-    // vm.parser.mark_compiler_roots();
+    mark_compiler_roots(vm.parser);
 }
 
 fn mark_value(value: Value) void {
@@ -58,5 +58,14 @@ fn mark_table(table: *std.StringHashMap(Value)) void {
     var iter = table.iterator();
     while (iter.next()) |kv| {
         mark_value(kv.value_ptr.*);
+    }
+}
+
+fn mark_compiler_roots(maybe_parser: ?*Parser) void {
+    if (maybe_parser) |parser| {
+        var maybe_compiler: ?*Compiler = parser.current_compiler;
+        while (maybe_compiler) |compiler| : (maybe_compiler = compiler.enclosing) {
+            mark_object(compiler.function.as_obj());
+        }
     }
 }
