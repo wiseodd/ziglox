@@ -9,151 +9,224 @@ const Function = @import("object.zig").Function;
 const Closure = @import("object.zig").Closure;
 const Parser = @import("compiler.zig").Parser;
 const Compiler = @import("compiler.zig").Compiler;
+const Allocator = std.mem.Allocator;
 
-const GC_HEAP_GROW_FACTOR: usize = 2;
+pub const GCAllocator = struct {
+    const GC_HEAP_GROW_FACTOR: usize = 2;
 
-pub fn collect_garbage(vm: *VirtualMachine) void {
-    var size_before: usize = undefined;
+    parent_allocator: Allocator,
+    vm: *VirtualMachine,
+    bytes_allocated: usize,
+    next_gc: usize,
 
-    if (flags.DEBUG_LOG_GC) {
-        std.debug.print("-- gc begin\n", .{});
-        size_before = vm.bytes_allocated;
+    pub fn init(parent_allocator: Allocator, vm: *VirtualMachine) GCAllocator {
+        return .{
+            .parent_allocator = parent_allocator,
+            .vm = vm,
+            .bytes_allocated = 0,
+            .next_gc = if (flags.DEBUG_STRESS_GC) 1 else (1024 * 1024),
+        };
     }
 
-    mark_roots(vm);
-    trace_references(vm);
-    // sweep(vm); // TODO: Buggy!
-
-    vm.next_gc = vm.bytes_allocated * GC_HEAP_GROW_FACTOR;
-
-    if (flags.DEBUG_LOG_GC) {
-        std.debug.print("-- gc end\n", .{});
-        std.debug.print(
-            "   collected {} bytes (from {} to {}), next at {}\n",
-            .{ size_before - vm.bytes_allocated, size_before, vm.bytes_allocated, vm.next_gc },
-        );
+    pub fn allocator(self: *GCAllocator) Allocator {
+        return Allocator{
+            .ptr = self,
+            .vtable = &.{
+                .alloc = alloc,
+                .resize = resize,
+                .free = free,
+            },
+        };
     }
-}
 
-fn mark_roots(vm: *VirtualMachine) void {
-    var slot: [*]Value = &vm.stack;
-    while (@intFromPtr(slot) < @intFromPtr(vm.stack_top)) : (slot += 1) {
-        mark_value(slot[0]);
+    fn alloc(ctx: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
+        const self: *GCAllocator = @ptrCast(@alignCast(ctx));
 
-        for (vm.frames[0..vm.frame_count]) |frame| {
-            mark_object(frame.closure.as_obj());
+        if (self.bytes_allocated + len > self.next_gc) {
+            self.collect_garbage();
         }
 
-        var maybe_upvalue = vm.open_upvalues;
+        self.bytes_allocated += len;
+
+        return self.parent_allocator.vtable.alloc(self.parent_allocator.ptr, len, ptr_align, ret_addr);
+    }
+
+    fn resize(ctx: *anyopaque, buf: []u8, buf_align: u8, new_len: usize, ret_addr: usize) bool {
+        const self: *GCAllocator = @ptrCast(@alignCast(ctx));
+
+        if (new_len > buf.len) {
+            if (self.bytes_allocated + (new_len - buf.len) > self.next_gc) {
+                self.collect_garbage();
+            }
+        }
+
+        if (self.parent_allocator.vtable.resize(self.parent_allocator.ptr, buf, buf_align, new_len, ret_addr)) {
+            if (new_len > buf.len) {
+                self.bytes_allocated += new_len - buf.len;
+            } else {
+                self.bytes_allocated -= buf.len - new_len;
+            }
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    fn free(ctx: *anyopaque, buf: []u8, buf_align: u8, ret_addr: usize) void {
+        const self: *GCAllocator = @ptrCast(@alignCast(ctx));
+
+        self.parent_allocator.vtable.free(self.parent_allocator.ptr, buf, buf_align, ret_addr);
+        self.bytes_allocated -= buf.len;
+    }
+
+    fn collect_garbage(self: *GCAllocator) void {
+        var size_before: usize = undefined;
+
+        if (flags.DEBUG_LOG_GC) {
+            std.debug.print("-- gc begin\n", .{});
+            size_before = self.bytes_allocated;
+        }
+
+        self.mark_roots();
+        self.trace_references();
+        self.sweep(); // TODO: Buggy!
+
+        self.next_gc = self.bytes_allocated * GC_HEAP_GROW_FACTOR;
+
+        if (flags.DEBUG_LOG_GC) {
+            std.debug.print("-- gc end\n", .{});
+            std.debug.print(
+                "   collected {} bytes (from {} to {}), next at {}\n",
+                .{ self.bytes_allocated - size_before, size_before, self.bytes_allocated, self.next_gc },
+            );
+        }
+    }
+
+    fn mark_roots(self: *GCAllocator) void {
+        var slot: [*]Value = &self.vm.stack;
+        while (@intFromPtr(slot) < @intFromPtr(self.vm.stack_top)) : (slot += 1) {
+            self.mark_value(slot[0]);
+        }
+
+        for (self.vm.frames[0..self.vm.frame_count]) |frame| {
+            self.mark_object(frame.closure.as_obj());
+        }
+
+        var maybe_upvalue = self.vm.open_upvalues;
         while (maybe_upvalue) |upvalue| : (maybe_upvalue = upvalue.next) {
-            mark_object(upvalue.as_obj());
+            self.mark_object(upvalue.as_obj());
         }
+
+        self.mark_table();
+        self.mark_compiler_roots();
     }
 
-    mark_table(&vm.globals);
-    mark_compiler_roots(vm.parser);
-}
+    fn mark_compiler_roots(self: *GCAllocator) void {
+        const parser = self.vm.parser orelse return;
 
-fn mark_compiler_roots(maybe_parser: ?*Parser) void {
-    if (maybe_parser) |parser| {
         var maybe_compiler: ?*Compiler = parser.current_compiler;
         while (maybe_compiler) |compiler| : (maybe_compiler = compiler.enclosing) {
-            mark_object(compiler.function.as_obj());
+            self.mark_object(compiler.function.as_obj());
         }
     }
-}
 
-fn mark_table(table: *std.StringHashMap(Value)) void {
-    var iter = table.iterator();
-    while (iter.next()) |kv| {
-        mark_value(kv.value_ptr.*);
+    fn mark_table(self: *GCAllocator) void {
+        var iter = self.vm.globals.iterator();
+        while (iter.next()) |kv| {
+            self.mark_value(kv.value_ptr.*);
+        }
     }
-}
 
-fn mark_value(value: Value) void {
-    if (value.is_obj()) {
-        mark_object(value.Obj);
+    fn mark_value(self: *GCAllocator, value: Value) void {
+        if (value.is_obj()) {
+            self.mark_object(value.Obj);
+        }
     }
-}
 
-fn mark_object(maybe_obj: ?*Obj) void {
-    if (maybe_obj) |obj| {
+    fn mark_object(self: *GCAllocator, maybe_obj: ?*Obj) void {
+        const obj = maybe_obj orelse return;
+
         if (obj.is_marked) return;
 
         if (flags.DEBUG_LOG_GC) {
-            std.debug.print("{*} mark ", .{obj});
+            std.debug.print("{*} ({s}) mark ", .{ obj, @tagName(obj.obj_type) });
             obj.println();
         }
 
         obj.is_marked = true;
-    }
-}
 
-fn mark_array(array: []Value) void {
-    for (array) |value| {
-        mark_value(value);
-    }
-}
-
-fn trace_references(vm: *VirtualMachine) void {
-    while (vm.gray_stack.items.len > 0) {
-        const obj = vm.gray_stack.pop();
-        blacken_object(obj);
-    }
-}
-
-fn blacken_object(obj: *Obj) void {
-    if (flags.DEBUG_LOG_GC) {
-        std.debug.print("{*} blacken ", .{obj});
-        obj.println();
+        // Crash the program if we can't even allocate memory for GC
+        self.vm.gray_stack.append(obj) catch {
+            std.process.exit(1);
+        };
     }
 
-    switch (obj.obj_type) {
-        .Upvalue => mark_value(obj.as(Upvalue).closed),
-        .Function => {
-            const function = obj.as(Function);
-            if (function.name) |name| mark_object(name.as_obj());
-            mark_array(function.chunk.constants.items);
-        },
-        .Closure => {
-            const closure = obj.as(Closure);
-            mark_object(closure.function.as_obj());
-
-            for (closure.upvalues[0..closure.upvalue_count]) |maybe_upvalue| {
-                if (maybe_upvalue) |upvalue| {
-                    mark_object(upvalue.as_obj());
-                }
-            }
-        },
-        else => {},
-    }
-}
-
-fn sweep(vm: *VirtualMachine) void {
-    var maybe_prev: ?*Obj = null;
-    var maybe_obj: ?*Obj = vm.objects;
-
-    while (maybe_obj) |obj| {
-        if (obj.is_marked) {
-            // Remove the color for the next time we do GC
-            obj.is_marked = false;
-
-            // Ignore marked -- reachable
-            maybe_prev = obj;
-            maybe_obj = obj.next;
-        } else {
-            const unreached = obj;
-
-            // Unlink obj from the objects linked list
-            maybe_obj = obj.next;
-            if (maybe_prev) |prev| {
-                prev.next = maybe_obj;
-            } else {
-                vm.objects = maybe_obj;
-            }
-
-            // Free up the unreachable obj
-            unreached.deinit(vm);
+    fn mark_array(self: *GCAllocator, array: []Value) void {
+        for (array) |value| {
+            self.mark_value(value);
         }
     }
-}
+
+    fn trace_references(self: *GCAllocator) void {
+        while (self.vm.gray_stack.items.len > 0) {
+            const obj = self.vm.gray_stack.pop();
+            self.blacken_object(obj);
+        }
+    }
+
+    fn blacken_object(self: *GCAllocator, obj: *Obj) void {
+        if (flags.DEBUG_LOG_GC) {
+            std.debug.print("{*} ({s}) blacken ", .{ obj, @tagName(obj.obj_type) });
+            obj.println();
+        }
+
+        switch (obj.obj_type) {
+            .Upvalue => self.mark_value(obj.as(Upvalue).closed),
+            .Function => {
+                const function = obj.as(Function);
+                if (function.name) |name| self.mark_object(name.as_obj());
+                self.mark_array(function.chunk.constants.items);
+            },
+            .Closure => {
+                const closure = obj.as(Closure);
+                self.mark_object(closure.function.as_obj());
+
+                for (closure.upvalues[0..closure.upvalue_count]) |maybe_upvalue| {
+                    if (maybe_upvalue) |upvalue| {
+                        self.mark_object(upvalue.as_obj());
+                    }
+                }
+            },
+            .String, .Native => {},
+        }
+    }
+
+    fn sweep(self: *GCAllocator) void {
+        var maybe_prev: ?*Obj = null;
+        var maybe_obj: ?*Obj = self.vm.objects;
+
+        while (maybe_obj) |obj| {
+            if (obj.is_marked) {
+                // Remove the color for the next time we do GC
+                obj.is_marked = false;
+
+                // Ignore marked -- reachable
+                maybe_prev = obj;
+                maybe_obj = obj.next;
+            } else {
+                const unreached = obj;
+
+                // Unlink obj from the objects linked list
+                maybe_obj = obj.next;
+                if (maybe_prev) |prev| {
+                    prev.next = maybe_obj;
+                } else {
+                    self.vm.objects = maybe_obj;
+                }
+
+                // Free up the unreachable obj
+                unreached.deinit(self.vm);
+            }
+        }
+    }
+};

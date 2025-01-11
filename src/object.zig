@@ -32,7 +32,7 @@ pub const Obj = struct {
     /// the newly initialized object lives in the heap. Otherwise, we will
     /// have an undefined behavior (use-after-free).
     pub fn init(vm: *VirtualMachine, comptime T: type, obj_type: ObjType) !*Obj {
-        const ptr = try vm.allocator.create(T);
+        const ptr = try vm.gc_allocator.allocator().create(T);
 
         ptr.obj = Obj{
             .obj_type = obj_type,
@@ -43,17 +43,10 @@ pub const Obj = struct {
         vm.objects = &ptr.obj;
 
         if (flags.DEBUG_LOG_GC) {
-            std.debug.print("{*} allocate {d} for {s}\n", .{ &ptr.obj, @sizeOf(T), @tagName(obj_type) });
-        }
-
-        vm.bytes_allocated += @sizeOf(T);
-
-        if (flags.DEBUG_STRESS_GC) {
-            mem.collect_garbage(vm);
-        } else {
-            if (vm.bytes_allocated > vm.next_gc) {
-                mem.collect_garbage(vm);
-            }
+            std.debug.print(
+                "{*} ({s}) allocate {d} for {s}\n",
+                .{ &ptr.obj, @tagName(ptr.obj.obj_type), @sizeOf(T), @tagName(obj_type) },
+            );
         }
 
         return &ptr.obj;

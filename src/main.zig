@@ -13,9 +13,6 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    var vm = try VirtualMachine.init(allocator);
-    defer vm.deinit();
-
     // Command-line arguments
     var app = App.init(allocator, "ziglox", "Lox bytecode compiler in Zig.");
     defer app.deinit();
@@ -39,6 +36,10 @@ pub fn main() !void {
     if (args.containsArg("stress-gc")) {
         flags.DEBUG_STRESS_GC = true;
     }
+
+    var vm = VirtualMachine{};
+    try vm.init(allocator);
+    defer vm.deinit();
 
     if (args.getSingleValue("FILE")) |f| {
         try run_file(f, &vm, allocator);

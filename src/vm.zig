@@ -13,6 +13,7 @@ const NativeFn = @import("object.zig").NativeFn;
 const Native = @import("object.zig").Native;
 const String = @import("object.zig").String;
 const Upvalue = @import("object.zig").Upvalue;
+const GCAllocator = @import("memory.zig").GCAllocator;
 const clock_native = @import("native.zig").clock_native;
 
 const FRAMES_MAX: usize = 64;
@@ -30,42 +31,39 @@ pub const CallFrame = struct {
 };
 
 pub const VirtualMachine = struct {
-    allocator: std.mem.Allocator,
-    parser: ?*Parser,
-    frames: [FRAMES_MAX]CallFrame,
-    frame_count: usize,
-    stack: [STACK_MAX]Value,
+    allocator: std.mem.Allocator = undefined,
+    gc_allocator: GCAllocator = undefined,
+    parser: ?*Parser = undefined,
+    frames: [FRAMES_MAX]CallFrame = undefined,
+    frame_count: usize = undefined,
+    stack: [STACK_MAX]Value = undefined,
     stack_top: [*]Value = undefined,
-    objects: ?*Obj, // Linked list of objects (funcs, strs, etc) created
-    open_upvalues: ?*Upvalue,
-    strings: std.StringHashMap(Value),
-    globals: std.StringHashMap(Value),
-    gray_stack: std.ArrayList(*Obj),
-    bytes_allocated: usize,
-    next_gc: usize,
+    objects: ?*Obj = undefined, // Linked list of objects (funcs, strs, etc) created
+    open_upvalues: ?*Upvalue = undefined,
+    strings: std.StringHashMap(Value) = undefined,
+    globals: std.StringHashMap(Value) = undefined,
+    gray_stack: std.ArrayList(*Obj) = undefined,
 
-    pub fn init(allocator: std.mem.Allocator) !VirtualMachine {
-        var vm = VirtualMachine{
-            .allocator = allocator,
-            .parser = null,
-            .frames = undefined,
-            .frame_count = 0,
-            .stack = undefined,
-            .objects = null,
-            .open_upvalues = null,
-            .strings = std.StringHashMap(Value).init(allocator),
-            .globals = std.StringHashMap(Value).init(allocator),
-            .gray_stack = std.ArrayList(*Obj).init(allocator),
-            .bytes_allocated = 0,
-            .next_gc = 1024 * 1024,
-        };
+    pub fn init(self: *VirtualMachine, parent_allocator: std.mem.Allocator) !void {
+        self.allocator = parent_allocator;
+        self.gc_allocator = GCAllocator.init(parent_allocator, self);
 
-        vm.reset_stack();
+        self.parser = null;
+        self.frames = undefined;
+        self.frame_count = 0;
+        self.stack = undefined;
+        self.objects = null;
+        self.open_upvalues = null;
+
+        const allocator = self.gc_allocator.allocator();
+        self.strings = std.StringHashMap(Value).init(allocator);
+        self.globals = std.StringHashMap(Value).init(allocator);
+        self.gray_stack = std.ArrayList(*Obj).init(allocator);
+
+        self.reset_stack();
 
         // Native functions
-        try vm.define_native("clock", clock_native);
-
-        return vm;
+        try self.define_native("clock", clock_native);
     }
 
     pub fn deinit(self: *VirtualMachine) void {

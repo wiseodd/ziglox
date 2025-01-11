@@ -1,10 +1,7 @@
-fun a() { 
-  print "hello"; 
-  b(); 
+{
+  var a = "hola";
 }
 
-fun b() {
-  print "hey";
-}
+var b = "hello";
 
-a();
+print b;
