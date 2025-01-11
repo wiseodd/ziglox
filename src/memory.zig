@@ -2,7 +2,11 @@ const std = @import("std");
 const flags = @import("flags.zig");
 const VirtualMachine = @import("vm.zig").VirtualMachine;
 const Value = @import("value.zig").Value;
+const ValueArray = @import("value.zig").ValueArray;
 const Obj = @import("object.zig").Obj;
+const Upvalue = @import("object.zig").Upvalue;
+const Function = @import("object.zig").Function;
+const Closure = @import("object.zig").Closure;
 const Parser = @import("compiler.zig").Parser;
 const Compiler = @import("compiler.zig").Compiler;
 
@@ -12,20 +16,10 @@ pub fn collect_garbage(vm: *VirtualMachine) void {
     }
 
     mark_roots(vm);
+    trace_references(vm);
 
     if (flags.DEBUG_LOG_GC) {
         std.debug.print("-- gc end\n", .{});
-    }
-}
-
-pub fn mark_object(maybe_obj: ?*Obj) void {
-    if (maybe_obj) |obj| {
-        obj.is_marked = true;
-
-        if (flags.DEBUG_LOG_GC) {
-            std.debug.print("{*} mark ", .{obj});
-            obj.println();
-        }
     }
 }
 
@@ -48,9 +42,12 @@ fn mark_roots(vm: *VirtualMachine) void {
     mark_compiler_roots(vm.parser);
 }
 
-fn mark_value(value: Value) void {
-    if (value.is_obj()) {
-        mark_object(value.Obj);
+fn mark_compiler_roots(maybe_parser: ?*Parser) void {
+    if (maybe_parser) |parser| {
+        var maybe_compiler: ?*Compiler = parser.current_compiler;
+        while (maybe_compiler) |compiler| : (maybe_compiler = compiler.enclosing) {
+            mark_object(compiler.function.as_obj());
+        }
     }
 }
 
@@ -61,11 +58,58 @@ fn mark_table(table: *std.StringHashMap(Value)) void {
     }
 }
 
-fn mark_compiler_roots(maybe_parser: ?*Parser) void {
-    if (maybe_parser) |parser| {
-        var maybe_compiler: ?*Compiler = parser.current_compiler;
-        while (maybe_compiler) |compiler| : (maybe_compiler = compiler.enclosing) {
-            mark_object(compiler.function.as_obj());
+fn mark_value(value: Value) void {
+    if (value.is_obj()) {
+        mark_object(value.Obj);
+    }
+}
+
+fn mark_object(maybe_obj: ?*Obj) void {
+    if (maybe_obj) |obj| {
+        if (obj.is_marked) return;
+
+        if (flags.DEBUG_LOG_GC) {
+            std.debug.print("{*} mark ", .{obj});
+            obj.println();
         }
+
+        obj.is_marked = true;
+    }
+}
+
+fn mark_array(array: *ValueArray) void {
+    for (array.items) |value| {
+        mark_value(value);
+    }
+}
+
+fn trace_references(vm: *VirtualMachine) void {
+    while (vm.gray_stack.popOrNull()) |object| {
+        blacken_object(object);
+    }
+}
+
+fn blacken_object(obj: *Obj) void {
+    if (flags.DEBUG_LOG_GC) {
+        std.debug.print("{*} blacken ", .{obj});
+        obj.println();
+    }
+
+    switch (obj.obj_type) {
+        .Upvalue => mark_value(obj.as(Upvalue).closed),
+        .Function => {
+            const function = obj.as(Function);
+            mark_object(if (function.name) |name| name.as_obj() else null);
+            mark_array(&function.chunk.constants);
+        },
+        .Closure => {
+            const closure = obj.as(Closure);
+            mark_object(closure.function.as_obj());
+
+            for (closure.upvalues) |maybe_upvalue| {
+                mark_object(if (maybe_upvalue) |upvalue| upvalue.as_obj() else null);
+            }
+        },
+        else => return,
     }
 }

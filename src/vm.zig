@@ -40,6 +40,7 @@ pub const VirtualMachine = struct {
     open_upvalues: ?*Upvalue,
     strings: std.StringHashMap(Value),
     globals: std.StringHashMap(Value),
+    gray_stack: std.ArrayList(*Obj),
 
     pub fn init(allocator: std.mem.Allocator) !VirtualMachine {
         var vm = VirtualMachine{
@@ -52,6 +53,7 @@ pub const VirtualMachine = struct {
             .open_upvalues = null,
             .strings = std.StringHashMap(Value).init(allocator),
             .globals = std.StringHashMap(Value).init(allocator),
+            .gray_stack = std.ArrayList(*Obj).init(allocator),
         };
 
         vm.reset_stack();
@@ -65,9 +67,9 @@ pub const VirtualMachine = struct {
     pub fn deinit(self: *VirtualMachine) void {
         self.strings.deinit();
         self.globals.deinit();
+        self.gray_stack.deinit();
 
         var maybe_obj = self.objects;
-
         while (maybe_obj) |obj| {
             const next = obj.next;
             obj.*.deinit(self);
