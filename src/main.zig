@@ -19,7 +19,7 @@ pub fn main() !void {
 
     var myapp = app.rootCommand();
     try myapp.addArg(Arg.positional("FILE", null, null));
-    try myapp.addArg(Arg.booleanOption("debug", 'd', null));
+    try myapp.addArg(Arg.booleanOption("debug-code", 'd', null));
     try myapp.addArg(Arg.booleanOption("debug-gc", 'g', null));
     try myapp.addArg(Arg.booleanOption("stress-gc", 's', null));
     const args = try app.parseProcess();

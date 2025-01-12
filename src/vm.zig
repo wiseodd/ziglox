@@ -15,6 +15,7 @@ const String = @import("object.zig").String;
 const Upvalue = @import("object.zig").Upvalue;
 const Class = @import("object.zig").Class;
 const Instance = @import("object.zig").Instance;
+const BoundMethod = @import("object.zig").BoundMethod;
 const GCAllocator = @import("memory.zig").GCAllocator;
 const clock_native = @import("native.zig").clock_native;
 
@@ -170,7 +171,9 @@ pub const VirtualMachine = struct {
                         _ = try self.pop();
                         try self.push(value);
                     } else {
-                        self.runtime_error("Undefined property '{s}'.", .{name});
+                        if (!self.bind_method(inst.class, name)) {
+                            return InterpretError.RuntimeError;
+                        }
                     }
                 },
 
@@ -389,6 +392,8 @@ pub const VirtualMachine = struct {
                     };
                     try self.push(Value.obj(class.as_obj()));
                 },
+
+                OpCode.Method => try self.define_method(try self.read_string(frame)),
             }
         }
     }
@@ -446,12 +451,36 @@ pub const VirtualMachine = struct {
                     return;
                 },
 
+                .BoundMethod => {
+                    const bound = obj.as(BoundMethod);
+                    return self.call(bound.method, arg_count);
+                },
+
                 else => {},
             }
         }
 
         self.runtime_error("Can only call functions and classes.", .{});
         return InterpretError.RuntimeError;
+    }
+
+    fn bind_method(self: *VirtualMachine, class: *Class, name: []const u8) bool {
+        const method: Value = class.methods.get(name) orelse {
+            self.runtime_error("Undefined property '{s}'.", .{name});
+            return false;
+        };
+
+        const bound = BoundMethod.init(self.peek(0), method.Obj.as(Closure), self) catch {
+            return false;
+        };
+        _ = self.pop() catch {
+            return false;
+        };
+        self.push(Value.obj(bound.as_obj())) catch {
+            return false;
+        };
+
+        return true;
     }
 
     fn capture_upvalue(self: *VirtualMachine, local: *Value) InterpretError!*Upvalue {
@@ -503,6 +532,15 @@ pub const VirtualMachine = struct {
 
             self.open_upvalues = upvalue.next;
         }
+    }
+
+    fn define_method(self: *VirtualMachine, name: []const u8) InterpretError!void {
+        const method: Value = self.peek(0);
+        const class = self.peek(1).Obj.as(Class);
+        class.methods.put(name, method) catch {
+            return InterpretError.RuntimeError;
+        };
+        _ = try self.pop();
     }
 
     fn runtime_error(self: *VirtualMachine, comptime format: []const u8, args: anytype) void {

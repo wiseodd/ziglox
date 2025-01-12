@@ -9,6 +9,7 @@ const Function = @import("object.zig").Function;
 const Closure = @import("object.zig").Closure;
 const Class = @import("object.zig").Class;
 const Instance = @import("object.zig").Instance;
+const BoundMethod = @import("object.zig").BoundMethod;
 const Parser = @import("compiler.zig").Parser;
 const Compiler = @import("compiler.zig").Compiler;
 const Allocator = std.mem.Allocator;
@@ -185,11 +186,13 @@ pub const GCAllocator = struct {
 
         switch (obj.obj_type) {
             .Upvalue => self.mark_value(obj.as(Upvalue).closed),
+
             .Function => {
                 const function = obj.as(Function);
                 if (function.name) |name| self.mark_object(name.as_obj());
                 self.mark_array(function.chunk.constants.items);
             },
+
             .Closure => {
                 const closure = obj.as(Closure);
                 self.mark_object(closure.function.as_obj());
@@ -200,15 +203,25 @@ pub const GCAllocator = struct {
                     }
                 }
             },
+
             .Class => {
                 const class = obj.as(Class);
                 self.mark_object(class.name.as_obj());
+                self.mark_table(&class.methods);
             },
+
             .Instance => {
                 const inst = obj.as(Instance);
                 self.mark_object(inst.class.as_obj());
                 self.mark_table(&inst.fields);
             },
+
+            .BoundMethod => {
+                const bound = obj.as(BoundMethod);
+                self.mark_value(bound.receiver);
+                self.mark_object(bound.method.as_obj());
+            },
+
             .String, .Native => {},
         }
     }

@@ -344,16 +344,37 @@ pub const Parser = struct {
         }
     }
 
+    fn method(self: *Parser) void {
+        // Method name
+        self.consume(TokenType.Identifier, "Expect method name.");
+        const constant: u8 = self.identifier_constant(&self.previous);
+
+        // Method body
+        self.fun(FunctionType.Function);
+
+        self.emit_bytes(@intFromEnum(OpCode.Method), constant);
+    }
+
     fn class_declaration(self: *Parser) void {
         self.consume(TokenType.Identifier, "Expect class name.");
+        const class_name: Token = self.previous;
         const name_constant: u8 = self.identifier_constant(&self.previous);
         self.declare_variable();
 
         self.emit_bytes(@intFromEnum(OpCode.Class), name_constant);
         self.define_variable(name_constant);
+        self.named_variable(class_name, false);
 
         self.consume(TokenType.LeftBrace, "Expect '{' before class body.");
+
+        // Parse the inside of the class
+        while (!self.check(TokenType.RightBrace) and !self.check(TokenType.EOF)) {
+            self.method();
+        }
+
         self.consume(TokenType.RightBrace, "Expect '}' after class body.");
+
+        self.emit_byte(@intFromEnum(OpCode.Pop));
     }
 
     fn fun_declaration(self: *Parser) void {

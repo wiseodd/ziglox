@@ -15,6 +15,7 @@ pub const ObjType = enum {
     Upvalue,
     Class,
     Instance,
+    BoundMethod,
 };
 
 pub const FunctionType = enum {
@@ -67,6 +68,7 @@ pub const Obj = struct {
             .Upvalue => self.as(Upvalue).deinit(vm),
             .Class => self.as(Class).deinit(vm),
             .Instance => self.as(Instance).deinit(vm),
+            .BoundMethod => self.as(BoundMethod).deinit(vm),
         }
     }
 
@@ -79,6 +81,7 @@ pub const Obj = struct {
             .Upvalue => self.as(Upvalue).print(),
             .Class => self.as(Class).print(),
             .Instance => self.as(Instance).print(),
+            .BoundMethod => self.as(BoundMethod).print(),
         }
     }
 
@@ -313,6 +316,7 @@ pub const Upvalue = struct {
 pub const Class = struct {
     obj: Obj,
     name: *String,
+    methods: std.StringHashMap(Value),
 
     pub fn init(name: *String, vm: *VirtualMachine) !*Class {
         const obj = try Obj.init(vm, Class, .Class);
@@ -321,12 +325,15 @@ pub const Class = struct {
         class.* = Class{
             .obj = obj.*,
             .name = name,
+            .methods = std.StringHashMap(Value).init(vm.gc_allocator.allocator()),
         };
 
         return class;
     }
 
     pub fn deinit(self: *Class, vm: *VirtualMachine) void {
+        // TODO: bug with GC!
+        self.methods.deinit();
         vm.allocator.destroy(self);
     }
 
@@ -372,10 +379,46 @@ pub const Instance = struct {
     }
 
     pub fn print(self: *const Instance) void {
-        std.debug.print("Intance of: [{s}]", .{self.class.name.chars});
+        std.debug.print("Instance of: [{s}]", .{self.class.name.chars});
     }
 
     pub fn println(self: *const Instance) void {
+        self.print();
+        std.debug.print("\n", .{});
+    }
+};
+
+pub const BoundMethod = struct {
+    obj: Obj,
+    receiver: Value,
+    method: *Closure,
+
+    pub fn init(receiver: Value, method: *Closure, vm: *VirtualMachine) !*BoundMethod {
+        const obj = try Obj.init(vm, BoundMethod, .BoundMethod);
+        const bm = obj.as(BoundMethod);
+
+        bm.* = BoundMethod{
+            .obj = obj.*,
+            .receiver = receiver,
+            .method = method,
+        };
+
+        return bm;
+    }
+
+    pub fn deinit(self: *BoundMethod, vm: *VirtualMachine) void {
+        vm.allocator.destroy(self);
+    }
+
+    pub inline fn as_obj(self: *BoundMethod) *Obj {
+        return @ptrCast(self);
+    }
+
+    pub fn print(self: *const BoundMethod) void {
+        self.method.function.print();
+    }
+
+    pub fn println(self: *const BoundMethod) void {
         self.print();
         std.debug.print("\n", .{});
     }

@@ -123,6 +123,10 @@ pub const Value = union(enum) {
         return self.is_obj() and self.Obj.obj_type == .Instance;
     }
 
+    pub inline fn is_bound_method(self: Value) bool {
+        return self.is_obj() and self.Obj.obj_type == .BoundMethod;
+    }
+
     pub inline fn is_nil(self: Value) bool {
         return switch (self) {
             .Nil => true,

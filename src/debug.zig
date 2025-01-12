@@ -82,6 +82,7 @@ pub fn disassemble_instruction(chunk: *Chunk, offset: usize) usize {
         OpCode.CloseUpvalue => return simple_instruction("OP_CLOSE_UPVALUE", offset),
         OpCode.Return => return simple_instruction("OP_RETURN", offset),
         OpCode.Class => return constant_instruction("OP_CLASS", chunk, offset),
+        OpCode.Method => return constant_instruction("OP_METHOD", chunk, offset),
     }
 }
 
