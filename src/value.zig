@@ -115,6 +115,10 @@ pub const Value = union(enum) {
         return self.is_obj() and self.Obj.obj_type == .Upvalue;
     }
 
+    pub inline fn is_class(self: Value) bool {
+        return self.is_obj() and self.Obj.obj_type == .Class;
+    }
+
     pub inline fn is_nil(self: Value) bool {
         return switch (self) {
             .Nil => true,

@@ -344,6 +344,18 @@ pub const Parser = struct {
         }
     }
 
+    fn class_declaration(self: *Parser) void {
+        self.consume(TokenType.Identifier, "Expect class name.");
+        const name_constant: u8 = self.identifier_constant(&self.previous);
+        self.declare_variable();
+
+        self.emit_bytes(@intFromEnum(OpCode.Class), name_constant);
+        self.define_variable(name_constant);
+
+        self.consume(TokenType.LeftBrace, "Expect '{' before class body.");
+        self.consume(TokenType.RightBrace, "Expect '}' after class body.");
+    }
+
     fn fun_declaration(self: *Parser) void {
         const global: u8 = self.parse_variable("Expect function name.");
         self.mark_initialized();
@@ -468,7 +480,9 @@ pub const Parser = struct {
     }
 
     fn declaration(self: *Parser) void {
-        if (self.match(TokenType.Fun)) {
+        if (self.match(TokenType.Class)) {
+            self.class_declaration();
+        } else if (self.match(TokenType.Fun)) {
             self.fun_declaration();
         } else if (self.match(TokenType.Var)) {
             self.var_declaration();

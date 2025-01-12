@@ -1,7 +1,3 @@
-{
-  var a = "hola";
-}
+class Brioche {}
 
-var b = "hello";
-
-print b;
+print Brioche;

@@ -13,6 +13,7 @@ pub const ObjType = enum {
     Native,
     String,
     Upvalue,
+    Class,
 };
 
 pub const FunctionType = enum {
@@ -63,6 +64,7 @@ pub const Obj = struct {
             .Closure => self.as(Closure).deinit(vm),
             .Native => self.as(Native).deinit(vm),
             .Upvalue => self.as(Upvalue).deinit(vm),
+            .Class => self.as(Class).deinit(vm),
         }
     }
 
@@ -73,6 +75,7 @@ pub const Obj = struct {
             .Closure => self.as(Closure).print(),
             .Native => self.as(Native).print(),
             .Upvalue => self.as(Upvalue).print(),
+            .Class => self.as(Class).print(),
         }
     }
 
@@ -299,6 +302,40 @@ pub const Upvalue = struct {
     }
 
     pub fn println(self: *const Upvalue) void {
+        self.print();
+        std.debug.print("\n", .{});
+    }
+};
+
+pub const Class = struct {
+    obj: Obj,
+    name: *String,
+
+    pub fn init(name: *String, vm: *VirtualMachine) !*Class {
+        const obj = try Obj.init(vm, Class, .Class);
+        const class = obj.as(Class);
+
+        class.* = Class{
+            .obj = obj.*,
+            .name = name,
+        };
+
+        return class;
+    }
+
+    pub fn deinit(self: *Class, vm: *VirtualMachine) void {
+        vm.allocator.destroy(self);
+    }
+
+    pub inline fn as_obj(self: *Class) *Obj {
+        return @ptrCast(self);
+    }
+
+    pub fn print(self: *const Class) void {
+        std.debug.print("{s}", .{self.name.chars});
+    }
+
+    pub fn println(self: *const Class) void {
         self.print();
         std.debug.print("\n", .{});
     }

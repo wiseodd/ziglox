@@ -13,6 +13,7 @@ const NativeFn = @import("object.zig").NativeFn;
 const Native = @import("object.zig").Native;
 const String = @import("object.zig").String;
 const Upvalue = @import("object.zig").Upvalue;
+const Class = @import("object.zig").Class;
 const GCAllocator = @import("memory.zig").GCAllocator;
 const clock_native = @import("native.zig").clock_native;
 
@@ -342,6 +343,16 @@ pub const VirtualMachine = struct {
                     self.stack_top = frame.slots;
                     try self.push(result);
                     frame = &self.frames[self.frame_count - 1];
+                },
+
+                OpCode.Class => {
+                    const class_name = String.init(try self.read_string(frame), self) catch {
+                        return InterpretError.RuntimeError;
+                    };
+                    const class = Class.init(class_name, self) catch {
+                        return InterpretError.RuntimeError;
+                    };
+                    try self.push(Value.obj(class.as_obj()));
                 },
             }
         }

@@ -7,6 +7,7 @@ const Obj = @import("object.zig").Obj;
 const Upvalue = @import("object.zig").Upvalue;
 const Function = @import("object.zig").Function;
 const Closure = @import("object.zig").Closure;
+const Class = @import("object.zig").Class;
 const Parser = @import("compiler.zig").Parser;
 const Compiler = @import("compiler.zig").Compiler;
 const Allocator = std.mem.Allocator;
@@ -174,6 +175,7 @@ pub const GCAllocator = struct {
         }
     }
 
+    /// Keep objects in the heap alive
     fn blacken_object(self: *GCAllocator, obj: *Obj) void {
         if (flags.DEBUG_LOG_GC) {
             std.debug.print("{*} ({s}) blacken ", .{ obj, @tagName(obj.obj_type) });
@@ -196,6 +198,10 @@ pub const GCAllocator = struct {
                         self.mark_object(upvalue.as_obj());
                     }
                 }
+            },
+            .Class => {
+                const class = obj.as(Class);
+                self.mark_object(class.name.as_obj());
             },
             .String, .Native => {},
         }
