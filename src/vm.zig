@@ -14,6 +14,7 @@ const Native = @import("object.zig").Native;
 const String = @import("object.zig").String;
 const Upvalue = @import("object.zig").Upvalue;
 const Class = @import("object.zig").Class;
+const Instance = @import("object.zig").Instance;
 const GCAllocator = @import("memory.zig").GCAllocator;
 const clock_native = @import("native.zig").clock_native;
 
@@ -41,7 +42,7 @@ pub const VirtualMachine = struct {
     stack_top: [*]Value = undefined,
     objects: ?*Obj = undefined, // Linked list of objects (funcs, strs, etc) created
     open_upvalues: ?*Upvalue = undefined,
-    strings: std.StringHashMap(Value) = undefined,
+    strings: std.StringHashMap(Value) = undefined, // TODO: strings interning is unimplemented
     globals: std.StringHashMap(Value) = undefined,
     gray_stack: std.ArrayList(*Obj) = undefined,
 
@@ -390,6 +391,7 @@ pub const VirtualMachine = struct {
 
             switch (obj.obj_type) {
                 .Closure => return try self.call(obj.as(Closure), arg_count),
+
                 .Native => {
                     const native_fn = obj.as(Native).function;
                     const result: Value = native_fn(arg_count, self.stack_top[@intFromPtr(self.stack_top) - 1 - arg_count .. @intFromPtr(self.stack_top) - 1].ptr);
@@ -397,6 +399,16 @@ pub const VirtualMachine = struct {
                     self.push(result) catch {
                         return InterpretError.RuntimeError;
                     };
+                    return;
+                },
+
+                .Class => {
+                    const class = obj.as(Class);
+                    const inst = Instance.init(class, self) catch {
+                        return InterpretError.RuntimeError;
+                    };
+                    const ptr: [*]Value = self.stack_top - arg_count - 1;
+                    ptr[0] = Value.obj(inst.as_obj());
                     return;
                 },
 

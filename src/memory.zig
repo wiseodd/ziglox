@@ -8,6 +8,7 @@ const Upvalue = @import("object.zig").Upvalue;
 const Function = @import("object.zig").Function;
 const Closure = @import("object.zig").Closure;
 const Class = @import("object.zig").Class;
+const Instance = @import("object.zig").Instance;
 const Parser = @import("compiler.zig").Parser;
 const Compiler = @import("compiler.zig").Compiler;
 const Allocator = std.mem.Allocator;
@@ -90,7 +91,7 @@ pub const GCAllocator = struct {
 
         self.mark_roots();
         self.trace_references();
-        self.sweep(); // TODO: Buggy!
+        self.sweep();
 
         self.next_gc = self.bytes_allocated * GC_HEAP_GROW_FACTOR;
 
@@ -118,7 +119,7 @@ pub const GCAllocator = struct {
             self.mark_object(upvalue.as_obj());
         }
 
-        self.mark_table();
+        self.mark_table(&self.vm.globals);
         self.mark_compiler_roots();
     }
 
@@ -131,8 +132,8 @@ pub const GCAllocator = struct {
         }
     }
 
-    fn mark_table(self: *GCAllocator) void {
-        var iter = self.vm.globals.iterator();
+    fn mark_table(self: *GCAllocator, table: *std.StringHashMap(Value)) void {
+        var iter = table.iterator();
         while (iter.next()) |kv| {
             self.mark_value(kv.value_ptr.*);
         }
@@ -202,6 +203,11 @@ pub const GCAllocator = struct {
             .Class => {
                 const class = obj.as(Class);
                 self.mark_object(class.name.as_obj());
+            },
+            .Instance => {
+                const inst = obj.as(Instance);
+                self.mark_object(inst.class.as_obj());
+                self.mark_table(&inst.fields);
             },
             .String, .Native => {},
         }

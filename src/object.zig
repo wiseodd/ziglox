@@ -14,6 +14,7 @@ pub const ObjType = enum {
     String,
     Upvalue,
     Class,
+    Instance,
 };
 
 pub const FunctionType = enum {
@@ -65,6 +66,7 @@ pub const Obj = struct {
             .Native => self.as(Native).deinit(vm),
             .Upvalue => self.as(Upvalue).deinit(vm),
             .Class => self.as(Class).deinit(vm),
+            .Instance => self.as(Instance).deinit(vm),
         }
     }
 
@@ -76,6 +78,7 @@ pub const Obj = struct {
             .Native => self.as(Native).print(),
             .Upvalue => self.as(Upvalue).print(),
             .Class => self.as(Class).print(),
+            .Instance => self.as(Instance).print(),
         }
     }
 
@@ -332,10 +335,47 @@ pub const Class = struct {
     }
 
     pub fn print(self: *const Class) void {
-        std.debug.print("{s}", .{self.name.chars});
+        std.debug.print("[{s}]", .{self.name.chars});
     }
 
     pub fn println(self: *const Class) void {
+        self.print();
+        std.debug.print("\n", .{});
+    }
+};
+
+pub const Instance = struct {
+    obj: Obj,
+    class: *Class,
+    fields: std.StringHashMap(Value),
+
+    pub fn init(class: *Class, vm: *VirtualMachine) !*Instance {
+        const obj = try Obj.init(vm, Instance, .Instance);
+        const inst = obj.as(Instance);
+
+        inst.* = Instance{
+            .obj = obj.*,
+            .class = class,
+            .fields = std.StringHashMap(Value).init(vm.gc_allocator.allocator()),
+        };
+
+        return inst;
+    }
+
+    pub fn deinit(self: *Instance, vm: *VirtualMachine) void {
+        self.fields.deinit();
+        vm.allocator.destroy(self);
+    }
+
+    pub inline fn as_obj(self: *Instance) *Obj {
+        return @ptrCast(self);
+    }
+
+    pub fn print(self: *const Instance) void {
+        std.debug.print("Intance of: [{s}]", .{self.class.name.chars});
+    }
+
+    pub fn println(self: *const Instance) void {
         self.print();
         std.debug.print("\n", .{});
     }
