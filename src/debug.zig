@@ -73,7 +73,7 @@ pub fn disassemble_instruction(chunk: *Chunk, offset: usize) usize {
 
                 std.debug.print(
                     "{d:>4}      |                     {s} {d}\n",
-                    .{ offset - 2, if (is_local != 0) "local" else "upvalue", index },
+                    .{ i - 2, if (is_local != 0) "local" else "upvalue", index },
                 );
             }
 

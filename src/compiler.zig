@@ -11,10 +11,15 @@ const Value = @import("value.zig").Value;
 const Obj = @import("object.zig").Obj;
 const ObjType = @import("object.zig").ObjType;
 const Function = @import("object.zig").Function;
-const FunctionType = @import("object.zig").FunctionType;
 const String = @import("object.zig").String;
 const FLAGS = @import("flags.zig");
 const debug = @import("debug.zig");
+
+pub const FunctionType = enum {
+    Function,
+    Script,
+    Method,
+};
 
 // Lowest to highest --- the ordering here implies
 // the ordering in the members' ordinal values `@intFromEnum(Precedence.Member)`.
@@ -79,12 +84,20 @@ pub const Compiler = struct {
             .scope_depth = 0,
         };
 
-        var local = ptr.locals[ptr.local_count];
+        var local = &ptr.locals[ptr.local_count];
         ptr.local_count += 1;
         local.maybe_depth = 0;
         local.is_captured = false;
-        local.name.start = "";
-        local.name.length = 0;
+
+        if (fun_type != FunctionType.Function) {
+            // Method
+            local.name.start = "this";
+            local.name.length = 4;
+        } else {
+            // Function
+            local.name.start = "";
+            local.name.length = 0;
+        }
 
         return ptr;
     }
@@ -94,10 +107,23 @@ pub const Compiler = struct {
     }
 };
 
-fn identifier_equals(a: *Token, b: *Token) bool {
-    if (a.length != b.length) return false;
-    return std.mem.eql(u8, a.start[0..a.length], b.start[0..b.length]);
-}
+// Storage for class variables
+pub const ClassCompiler = struct {
+    enclosing: ?*ClassCompiler,
+
+    pub fn init(
+        vm: *VirtualMachine,
+        enclosing: ?*ClassCompiler,
+    ) !*ClassCompiler {
+        const ptr = try vm.allocator.create(ClassCompiler);
+        ptr.* = ClassCompiler{ .enclosing = enclosing };
+        return ptr;
+    }
+
+    pub fn deinit(self: *ClassCompiler, vm: *VirtualMachine) void {
+        vm.allocator.destroy(self);
+    }
+};
 
 pub const Parser = struct {
     // Type alias for parser functions (`unary`, `binary`, etc.)
@@ -117,6 +143,7 @@ pub const Parser = struct {
     source: []const u8,
     scanner: Scanner,
     current_compiler: *Compiler,
+    current_class: ?*ClassCompiler,
     local: *Local = undefined,
     current: Token = undefined,
     previous: Token = undefined,
@@ -160,7 +187,7 @@ pub const Parser = struct {
         .Print = ParseRule{},
         .Return = ParseRule{},
         .Super = ParseRule{},
-        .This = ParseRule{},
+        .This = ParseRule{ .prefix = this, .infix = null, .precedence = Precedence.None },
         .True = ParseRule{ .prefix = literal, .infix = null, .precedence = Precedence.None },
         .Var = ParseRule{},
         .While = ParseRule{},
@@ -177,6 +204,7 @@ pub const Parser = struct {
             .source = source,
             .scanner = Scanner.init(source),
             .current_compiler = try Compiler.init(vm, .Script, null),
+            .current_class = null,
         };
     }
 
@@ -350,7 +378,7 @@ pub const Parser = struct {
         const constant: u8 = self.identifier_constant(&self.previous);
 
         // Method body
-        self.fun(FunctionType.Function);
+        self.fun(FunctionType.Method);
 
         self.emit_bytes(@intFromEnum(OpCode.Method), constant);
     }
@@ -363,6 +391,14 @@ pub const Parser = struct {
 
         self.emit_bytes(@intFromEnum(OpCode.Class), name_constant);
         self.define_variable(name_constant);
+
+        const class_comp = ClassCompiler.init(self.vm, self.current_class) catch {
+            self.err("Unable to initialize a class compiler.");
+            return;
+        };
+        defer class_comp.deinit(self.vm);
+        self.current_class = class_comp;
+
         self.named_variable(class_name, false);
 
         self.consume(TokenType.LeftBrace, "Expect '{' before class body.");
@@ -373,8 +409,11 @@ pub const Parser = struct {
         }
 
         self.consume(TokenType.RightBrace, "Expect '}' after class body.");
-
         self.emit_byte(@intFromEnum(OpCode.Pop));
+
+        if (self.current_class) |cc| {
+            self.current_class = cc.enclosing;
+        }
     }
 
     fn fun_declaration(self: *Parser) void {
@@ -645,6 +684,17 @@ pub const Parser = struct {
 
     fn variable(self: *Parser, can_assign: bool) void {
         self.named_variable(self.previous, can_assign);
+    }
+
+    fn this(self: *Parser, can_assign: bool) void {
+        _ = can_assign;
+
+        if (self.current_class == null) {
+            self.err("Can't use 'this' outside of a class.");
+            return;
+        }
+
+        self.variable(false);
     }
 
     fn named_variable(self: *Parser, name: Token, can_assign: bool) void {
@@ -1106,3 +1156,8 @@ pub const Parser = struct {
         self.had_error = true;
     }
 };
+
+fn identifier_equals(a: *Token, b: *Token) bool {
+    if (a.length != b.length) return false;
+    return std.mem.eql(u8, a.start[0..a.length], b.start[0..b.length]);
+}

@@ -1,7 +1,11 @@
-class Pair { }
+class Pair {
+  method() {
+    print this.first + this.second;
+  }
+}
 
 var pair = Pair();
 pair.first = 1;
 pair.second = 2;
 
-print pair.first + pair.second;
+pair.method();

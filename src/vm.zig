@@ -453,6 +453,7 @@ pub const VirtualMachine = struct {
 
                 .BoundMethod => {
                     const bound = obj.as(BoundMethod);
+                    (self.stack_top - arg_count - 1)[0] = bound.receiver;
                     return self.call(bound.method, arg_count);
                 },
 

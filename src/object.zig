@@ -18,11 +18,6 @@ pub const ObjType = enum {
     BoundMethod,
 };
 
-pub const FunctionType = enum {
-    Function,
-    Script,
-};
-
 // For function pointer to a native func
 pub const NativeFn = fn (usize, [*]Value) Value;
 
