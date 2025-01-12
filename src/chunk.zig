@@ -17,6 +17,8 @@ pub const OpCode = enum(u8) {
     SetGlobal,
     GetUpvalue,
     SetUpvalue,
+    GetProperty,
+    SetProperty,
     Equal,
     Greater,
     Less,

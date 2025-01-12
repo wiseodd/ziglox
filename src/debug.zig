@@ -38,6 +38,8 @@ pub fn disassemble_instruction(chunk: *Chunk, offset: usize) usize {
         OpCode.SetGlobal => return constant_instruction("OP_SET_GLOBAL", chunk, offset),
         OpCode.GetUpvalue => return byte_instruction("OP_GET_UPVALUE", chunk, offset),
         OpCode.SetUpvalue => return byte_instruction("OP_SET_UPVALUE", chunk, offset),
+        OpCode.GetProperty => return constant_instruction("OP_GET_PROPERTY", chunk, offset),
+        OpCode.SetProperty => return constant_instruction("OP_SET_PROPERTY", chunk, offset),
         OpCode.Equal => return simple_instruction("OP_EQUAL", offset),
         OpCode.Pop => return simple_instruction("OP_POP", offset),
         OpCode.Greater => return simple_instruction("OP_GREATER", offset),

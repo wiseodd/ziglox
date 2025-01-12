@@ -131,7 +131,7 @@ pub const Parser = struct {
         .LeftBrace = ParseRule{},
         .RightBrace = ParseRule{},
         .Comma = ParseRule{},
-        .Dot = ParseRule{},
+        .Dot = ParseRule{ .prefix = null, .infix = dot, .precedence = Precedence.Call },
         .Minus = ParseRule{ .prefix = unary, .infix = binary, .precedence = Precedence.Term },
         .Plus = ParseRule{ .prefix = null, .infix = binary, .precedence = Precedence.Term },
         .SemiColon = ParseRule{},
@@ -710,6 +710,18 @@ pub const Parser = struct {
 
         const arg_count: u8 = self.argument_list();
         self.emit_bytes(@intFromEnum(OpCode.Call), arg_count);
+    }
+
+    fn dot(self: *Parser, can_assign: bool) void {
+        self.consume(TokenType.Identifier, "Expect property name after '.'.");
+        const name: u8 = self.identifier_constant(&self.previous);
+
+        if (can_assign and self.match(TokenType.Equal)) {
+            self.expression();
+            self.emit_bytes(@intFromEnum(OpCode.SetProperty), name);
+        } else {
+            self.emit_bytes(@intFromEnum(OpCode.GetProperty), name);
+        }
     }
 
     fn literal(self: *Parser, can_assign: bool) void {

@@ -157,6 +157,40 @@ pub const VirtualMachine = struct {
 
                 OpCode.False => try self.push(Value.boolean(false)),
 
+                OpCode.GetProperty => {
+                    if (!self.peek(0).is_instance()) {
+                        self.runtime_error("Can't get property: only instances have properties.", .{});
+                        return InterpretError.RuntimeError;
+                    }
+
+                    const inst = self.peek(0).Obj.as(Instance);
+                    const name = try self.read_string(frame);
+
+                    if (inst.fields.get(name)) |value| {
+                        _ = try self.pop();
+                        try self.push(value);
+                    } else {
+                        self.runtime_error("Undefined property '{s}'.", .{name});
+                    }
+                },
+
+                OpCode.SetProperty => {
+                    if (!self.peek(1).is_instance()) {
+                        self.runtime_error("Can't set property: only instances have properties.", .{});
+                        return InterpretError.RuntimeError;
+                    }
+
+                    const inst = self.peek(1).Obj.as(Instance);
+
+                    inst.fields.put(try self.read_string(frame), self.peek(0)) catch {
+                        return InterpretError.RuntimeError;
+                    };
+
+                    const value = try self.pop();
+                    _ = try self.pop();
+                    try self.push(value);
+                },
+
                 OpCode.Equal => {
                     const b = try self.pop();
                     const a = try self.pop();
