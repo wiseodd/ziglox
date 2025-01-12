@@ -19,6 +19,7 @@ pub const FunctionType = enum {
     Function,
     Script,
     Method,
+    Initializer,
 };
 
 // Lowest to highest --- the ordering here implies
@@ -377,8 +378,13 @@ pub const Parser = struct {
         self.consume(TokenType.Identifier, "Expect method name.");
         const constant: u8 = self.identifier_constant(&self.previous);
 
+        var fun_type = FunctionType.Method;
+        if (self.previous.length == 4 and std.mem.eql(u8, "init", self.previous.start[0..self.previous.length])) {
+            fun_type = FunctionType.Initializer;
+        }
+
         // Method body
-        self.fun(FunctionType.Method);
+        self.fun(fun_type);
 
         self.emit_bytes(@intFromEnum(OpCode.Method), constant);
     }
@@ -589,6 +595,10 @@ pub const Parser = struct {
         if (self.match(TokenType.SemiColon)) {
             self.emit_return();
         } else {
+            if (self.current_compiler.fun_type == .Initializer) {
+                self.err("Can't return a value from an initializer.");
+            }
+
             self.expression();
             self.consume(TokenType.SemiColon, "Expect ';' after return value.");
             self.emit_byte(@intFromEnum(OpCode.Return));
@@ -790,6 +800,11 @@ pub const Parser = struct {
         if (can_assign and self.match(TokenType.Equal)) {
             self.expression();
             self.emit_bytes(@intFromEnum(OpCode.SetProperty), name);
+        } else if (self.match(TokenType.LeftParen)) {
+            // Method invocation
+            const arg_count: u8 = self.argument_list();
+            self.emit_bytes(@intFromEnum(OpCode.Invoke), name);
+            self.emit_byte(arg_count);
         } else {
             self.emit_bytes(@intFromEnum(OpCode.GetProperty), name);
         }
@@ -1075,7 +1090,11 @@ pub const Parser = struct {
     }
 
     fn emit_return(self: *Parser) void {
-        self.emit_byte(@intFromEnum(OpCode.Nil));
+        switch (self.current_compiler.fun_type) {
+            .Initializer => self.emit_bytes(@intFromEnum(OpCode.GetLocal), 0),
+            else => self.emit_byte(@intFromEnum(OpCode.Nil)),
+        }
+
         self.emit_byte(@intFromEnum(OpCode.Return));
     }
 

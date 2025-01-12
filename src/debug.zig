@@ -83,6 +83,7 @@ pub fn disassemble_instruction(chunk: *Chunk, offset: usize) usize {
         OpCode.Return => return simple_instruction("OP_RETURN", offset),
         OpCode.Class => return constant_instruction("OP_CLASS", chunk, offset),
         OpCode.Method => return constant_instruction("OP_METHOD", chunk, offset),
+        OpCode.Invoke => return invoke_instruction("OP_INVOKE", chunk, offset),
     }
 }
 
@@ -103,6 +104,16 @@ fn constant_instruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     std.debug.print("'\n", .{});
 
     return offset + 2;
+}
+
+fn invoke_instruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
+    const constant = chunk.code.items[offset + 1];
+    const arg_count = chunk.code.items[offset + 2];
+
+    std.debug.print("{s:<16} ({d} args) {d:>4} '", .{ name, arg_count, constant });
+    chunk.constants.items[constant].Obj.println();
+
+    return offset + 3;
 }
 
 fn byte_instruction(name: []const u8, chunk: *Chunk, offset: usize) usize {

@@ -46,6 +46,7 @@ pub const VirtualMachine = struct {
     strings: std.StringHashMap(Value) = undefined, // TODO: strings interning is unimplemented
     globals: std.StringHashMap(Value) = undefined,
     gray_stack: std.ArrayList(*Obj) = undefined,
+    init_string: ?*String = null,
 
     pub fn init(self: *VirtualMachine, parent_allocator: std.mem.Allocator) !void {
         self.allocator = parent_allocator;
@@ -65,6 +66,8 @@ pub const VirtualMachine = struct {
 
         self.reset_stack();
 
+        self.init_string = try String.init("init", self);
+
         // Native functions
         try self.define_native("clock", clock_native);
     }
@@ -73,6 +76,7 @@ pub const VirtualMachine = struct {
         self.strings.deinit();
         self.globals.deinit();
         self.gray_stack.deinit();
+        self.init_string = null;
 
         var maybe_obj = self.objects;
         while (maybe_obj) |obj| {
@@ -394,6 +398,14 @@ pub const VirtualMachine = struct {
                 },
 
                 OpCode.Method => try self.define_method(try self.read_string(frame)),
+
+                OpCode.Invoke => {
+                    const method_name: []const u8 = try self.read_string(frame);
+                    const arg_count: u8 = self.read_byte(frame);
+
+                    try self.invoke(method_name, arg_count);
+                    frame = &self.frames[self.frame_count - 1];
+                },
             }
         }
     }
@@ -446,8 +458,16 @@ pub const VirtualMachine = struct {
                     const inst = Instance.init(class, self) catch {
                         return InterpretError.RuntimeError;
                     };
-                    const ptr: [*]Value = self.stack_top - arg_count - 1;
-                    ptr[0] = Value.obj(inst.as_obj());
+                    (self.stack_top - arg_count - 1)[0] = Value.obj(inst.as_obj());
+
+                    if (class.methods.get(self.init_string.?.chars)) |initializer| {
+                        try self.call(initializer.Obj.as(Closure), arg_count);
+                    } else if (arg_count != 0) {
+                        // No initializer, but args to the class are provided
+                        self.runtime_error("Expected 0 arguments but got {}.", .{arg_count});
+                        return InterpretError.RuntimeError;
+                    }
+
                     return;
                 },
 
@@ -463,6 +483,33 @@ pub const VirtualMachine = struct {
 
         self.runtime_error("Can only call functions and classes.", .{});
         return InterpretError.RuntimeError;
+    }
+
+    fn invoke_from_class(self: *VirtualMachine, class: *Class, name: []const u8, arg_count: u8) InterpretError!void {
+        const method = class.methods.get(name) orelse {
+            self.runtime_error("Undefined property '{s}'.", .{name});
+            return InterpretError.RuntimeError;
+        };
+
+        return self.call(method.Obj.as(Closure), arg_count);
+    }
+
+    fn invoke(self: *VirtualMachine, name: []const u8, arg_count: u8) InterpretError!void {
+        const receiver: Value = self.peek(arg_count);
+
+        if (!receiver.is_instance()) {
+            self.runtime_error("Only instances have methods.", .{});
+            return InterpretError.RuntimeError;
+        }
+
+        const instance = receiver.Obj.as(Instance);
+
+        if (instance.fields.get(name)) |field| {
+            (self.stack_top - arg_count - 1)[0] = field;
+            return self.call_value(field, arg_count);
+        }
+
+        return self.invoke_from_class(instance.class, name, arg_count);
     }
 
     fn bind_method(self: *VirtualMachine, class: *Class, name: []const u8) bool {

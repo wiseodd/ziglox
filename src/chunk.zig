@@ -38,6 +38,7 @@ pub const OpCode = enum(u8) {
     Return,
     Class,
     Method,
+    Invoke,
 };
 
 pub const Chunk = struct {

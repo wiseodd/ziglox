@@ -14,6 +14,7 @@ const Parser = @import("compiler.zig").Parser;
 const Compiler = @import("compiler.zig").Compiler;
 const Allocator = std.mem.Allocator;
 
+// TODO: Bug in class/instance GC
 pub const GCAllocator = struct {
     const GC_HEAP_GROW_FACTOR: usize = 2;
 
@@ -122,6 +123,10 @@ pub const GCAllocator = struct {
 
         self.mark_table(&self.vm.globals);
         self.mark_compiler_roots();
+
+        if (self.vm.init_string) |init_str| {
+            self.mark_object(init_str.as_obj());
+        }
     }
 
     fn mark_compiler_roots(self: *GCAllocator) void {
