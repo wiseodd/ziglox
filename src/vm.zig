@@ -33,6 +33,7 @@ pub const CallFrame = struct {
     slots: [*]Value = undefined,
 };
 
+// WARN: Some GC allocator bug on classes and instances
 pub const VirtualMachine = struct {
     allocator: std.mem.Allocator = undefined,
     gc_allocator: GCAllocator = undefined,
@@ -43,7 +44,7 @@ pub const VirtualMachine = struct {
     stack_top: [*]Value = undefined,
     objects: ?*Obj = undefined, // Linked list of objects (funcs, strs, etc) created
     open_upvalues: ?*Upvalue = undefined,
-    strings: std.StringHashMap(Value) = undefined, // TODO: strings interning is unimplemented
+    strings: std.StringHashMap(*String) = undefined,
     globals: std.StringHashMap(Value) = undefined,
     gray_stack: std.ArrayList(*Obj) = undefined,
     init_string: ?*String = null,
@@ -60,7 +61,7 @@ pub const VirtualMachine = struct {
         self.open_upvalues = null;
 
         const allocator = self.gc_allocator.allocator();
-        self.strings = std.StringHashMap(Value).init(allocator);
+        self.strings = std.StringHashMap(*String).init(allocator);
         self.globals = std.StringHashMap(Value).init(allocator);
         self.gray_stack = std.ArrayList(*Obj).init(allocator);
 

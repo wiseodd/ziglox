@@ -102,21 +102,26 @@ pub const String = struct {
     /// the newly initialized object lives in the heap. Otherwise, we will
     /// have an undefined behavior (use-after-free).
     pub fn init(chars: []const u8, vm: *VirtualMachine) !*String {
-        const obj = try Obj.init(vm, String, .String);
-        const str = obj.as(String);
+        if (vm.strings.get(chars)) |interned| {
+            return interned;
+        } else {
+            const obj = try Obj.init(vm, String, .String);
+            const str = obj.as(String);
 
-        var chars_cpy = try vm.allocator.alloc(u8, chars.len);
-        @memcpy(chars_cpy[0..chars.len], chars);
+            var chars_cpy = try vm.allocator.alloc(u8, chars.len);
+            @memcpy(chars_cpy[0..chars.len], chars);
 
-        str.* = String{
-            .obj = obj.*,
-            .chars = chars_cpy,
-        };
+            str.* = String{
+                .obj = obj.*,
+                .chars = chars_cpy,
+            };
 
-        try vm.push(Value.from_obj(str.as_obj()));
-        _ = try vm.pop();
+            try vm.push(Value.from_obj(str.as_obj()));
+            try vm.strings.put(chars, str);
+            _ = try vm.pop();
 
-        return str;
+            return str;
+        }
     }
 
     pub fn deinit(self: *String, vm: *VirtualMachine) void {
