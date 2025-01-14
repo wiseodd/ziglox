@@ -365,7 +365,7 @@ pub const Parser = struct {
         self.block();
 
         const function = self.end_compiler();
-        const val = Value.obj(function.as_obj());
+        const val = Value.from_obj(function.as_obj());
         self.emit_bytes(@intFromEnum(OpCode.Closure), self.make_constant(val));
 
         for (compiler.upvalues[0..function.upvalue_count]) |upvalue| {
@@ -683,7 +683,7 @@ pub const Parser = struct {
             self.err("Invalid number string.");
             return;
         };
-        self.emit_constant(Value.number(val));
+        self.emit_constant(Value.from_number(val));
     }
 
     fn or_(self: *Parser, can_assign: bool) void {
@@ -710,7 +710,7 @@ pub const Parser = struct {
             self.err("Error allocating string.");
             return;
         };
-        const val = Value.obj(str.as_obj());
+        const val = Value.from_obj(str.as_obj());
         return self.emit_constant(val);
     }
 
@@ -950,7 +950,7 @@ pub const Parser = struct {
             return 0;
         };
 
-        return self.make_constant(Value.obj(obj_str.as_obj()));
+        return self.make_constant(Value.from_obj(obj_str.as_obj()));
     }
 
     fn declare_variable(self: *Parser) void {

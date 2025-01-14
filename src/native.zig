@@ -8,5 +8,5 @@ pub fn clock_native(arg_count: usize, args: [*]Value) Value {
     const micro: f64 = @floatFromInt(std.time.microTimestamp());
     const cast: f64 = 1e6;
 
-    return Value.number(micro / cast);
+    return Value.from_number(micro / cast);
 }

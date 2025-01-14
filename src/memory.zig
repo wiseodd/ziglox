@@ -147,7 +147,7 @@ pub const GCAllocator = struct {
 
     fn mark_value(self: *GCAllocator, value: Value) void {
         if (value.is_obj()) {
-            self.mark_object(value.Obj);
+            self.mark_object(value.to_obj());
         }
     }
 

@@ -113,7 +113,7 @@ pub const String = struct {
             .chars = chars_cpy,
         };
 
-        try vm.push(Value.obj(str.as_obj()));
+        try vm.push(Value.from_obj(str.as_obj()));
         _ = try vm.pop();
 
         return str;
@@ -283,7 +283,7 @@ pub const Upvalue = struct {
             .obj = obj.*,
             .location = slot,
             .next = null,
-            .closed = Value.nil(),
+            .closed = Value.from_nil(),
         };
 
         return upvalue;

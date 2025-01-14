@@ -64,7 +64,7 @@ pub fn disassemble_instruction(chunk: *Chunk, offset: usize) usize {
             std.debug.print("{s:<16} {d:>4} ", .{ "OP_CLOSURE", constant });
             chunk.constants.items[constant].println();
 
-            const function = chunk.constants.items[constant].Obj.as(Function);
+            const function = chunk.constants.items[constant].to_obj().as(Function);
             for (0..function.upvalue_count) |_| {
                 const is_local: u8 = chunk.code.items[i];
                 i += 1;
@@ -114,7 +114,7 @@ fn invoke_instruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const arg_count = chunk.code.items[offset + 2];
 
     std.debug.print("{s:<16} ({d} args) {d:>4} '", .{ name, arg_count, constant });
-    chunk.constants.items[constant].Obj.println();
+    chunk.constants.items[constant].to_obj().println();
 
     return offset + 3;
 }

@@ -96,13 +96,13 @@ pub const VirtualMachine = struct {
         const function = try self.parser.?.compile();
 
         // Put the top-level function into the call frame
-        try self.push(Value.obj(function.as_obj()));
+        try self.push(Value.from_obj(function.as_obj()));
 
         const closure = Closure.init(function, self) catch {
             return InterpretError.RuntimeError;
         };
         _ = try self.pop();
-        try self.push(Value.obj(closure.as_obj()));
+        try self.push(Value.from_obj(closure.as_obj()));
 
         // Call the top-level frame
         try self.call(closure, 0);
@@ -156,11 +156,11 @@ pub const VirtualMachine = struct {
                     try self.push(constant);
                 },
 
-                OpCode.Nil => try self.push(Value.nil()),
+                OpCode.Nil => try self.push(Value.from_nil()),
 
-                OpCode.True => try self.push(Value.boolean(true)),
+                OpCode.True => try self.push(Value.from_boolean(true)),
 
-                OpCode.False => try self.push(Value.boolean(false)),
+                OpCode.False => try self.push(Value.from_boolean(false)),
 
                 OpCode.GetProperty => {
                     if (!self.peek(0).is_instance()) {
@@ -168,7 +168,7 @@ pub const VirtualMachine = struct {
                         return InterpretError.RuntimeError;
                     }
 
-                    const inst = self.peek(0).Obj.as(Instance);
+                    const inst = self.peek(0).to_obj().as(Instance);
                     const name = try self.read_string(frame);
 
                     if (inst.fields.get(name)) |value| {
@@ -187,7 +187,7 @@ pub const VirtualMachine = struct {
                         return InterpretError.RuntimeError;
                     }
 
-                    const inst = self.peek(1).Obj.as(Instance);
+                    const inst = self.peek(1).to_obj().as(Instance);
 
                     inst.fields.put(try self.read_string(frame), self.peek(0)) catch {
                         return InterpretError.RuntimeError;
@@ -201,7 +201,7 @@ pub const VirtualMachine = struct {
                 OpCode.Equal => {
                     const b = try self.pop();
                     const a = try self.pop();
-                    try self.push(Value.boolean(a.equals(b)));
+                    try self.push(Value.from_boolean(a.equals(b)));
                 },
 
                 OpCode.GetUpvalue => {
@@ -266,8 +266,8 @@ pub const VirtualMachine = struct {
                     if (self.peek(0).is_string() and self.peek(1).is_string()) {
                         // Use peek instead of pop to keep the strings in the stack
                         // so that the GC won't free them.
-                        const str2: []const u8 = self.peek(0).Obj.as(String).chars;
-                        const str1: []const u8 = self.peek(1).Obj.as(String).chars;
+                        const str2: []const u8 = self.peek(0).to_obj().as(String).chars;
+                        const str1: []const u8 = self.peek(1).to_obj().as(String).chars;
 
                         var res_chars = self.allocator.alloc(u8, str1.len + str2.len) catch {
                             return InterpretError.RuntimeError;
@@ -282,11 +282,11 @@ pub const VirtualMachine = struct {
                         _ = try self.pop();
                         _ = try self.pop();
 
-                        try self.push(Value.obj(res_str.as_obj()));
+                        try self.push(Value.from_obj(res_str.as_obj()));
                     } else if (self.peek(0).is_number() and self.peek(1).is_number()) {
-                        const num2: f64 = (try self.pop()).Number;
-                        const num1: f64 = (try self.pop()).Number;
-                        const res_val = Value.number(num1 + num2);
+                        const num2: f64 = (try self.pop()).to_number();
+                        const num1: f64 = (try self.pop()).to_number();
+                        const res_val = Value.from_number(num1 + num2);
 
                         try self.push(res_val);
                     } else {
@@ -301,18 +301,15 @@ pub const VirtualMachine = struct {
 
                 OpCode.Divide => try self.binary_op(OpCode.Divide),
 
-                OpCode.Not => try self.push(Value.boolean((try self.pop()).is_falsey())),
+                OpCode.Not => try self.push(Value.from_boolean((try self.pop()).is_falsey())),
 
                 OpCode.Negate => {
-                    switch (self.peek(0)) {
-                        .Number => {
-                            const negated = Value.number(-(try self.pop()).Number);
-                            try self.push(negated);
-                        },
-                        else => {
-                            self.runtime_error("Operand must be a number.", .{});
-                            return InterpretError.RuntimeError;
-                        },
+                    if (self.peek(0).is_number()) {
+                        const negated = Value.from_number(-(try self.pop()).to_number());
+                        try self.push(negated);
+                    } else {
+                        self.runtime_error("Operand must be a number.", .{});
+                        return InterpretError.RuntimeError;
                     }
                 },
 
@@ -349,11 +346,11 @@ pub const VirtualMachine = struct {
                 },
 
                 OpCode.Closure => {
-                    const function = self.read_constant(frame).Obj.as(Function);
+                    const function = self.read_constant(frame).to_obj().as(Function);
                     const closure = Closure.init(function, self) catch {
                         return InterpretError.RuntimeError;
                     };
-                    try self.push(Value.obj(closure.as_obj()));
+                    try self.push(Value.from_obj(closure.as_obj()));
 
                     for (closure.upvalues) |*upvalue| {
                         const is_local = self.read_byte(frame);
@@ -394,7 +391,7 @@ pub const VirtualMachine = struct {
                     const class = Class.init(class_name, self) catch {
                         return InterpretError.RuntimeError;
                     };
-                    try self.push(Value.obj(class.as_obj()));
+                    try self.push(Value.from_obj(class.as_obj()));
                 },
 
                 OpCode.Method => try self.define_method(try self.read_string(frame)),
@@ -412,8 +409,8 @@ pub const VirtualMachine = struct {
                         self.runtime_error("Superclass must be a class.", .{});
                     }
 
-                    const superclass = self.peek(1).Obj.as(Class);
-                    const subclass = self.peek(0).Obj.as(Class);
+                    const superclass = self.peek(1).to_obj().as(Class);
+                    const subclass = self.peek(0).to_obj().as(Class);
 
                     var iter = superclass.methods.iterator();
                     while (iter.next()) |kv| {
@@ -427,7 +424,7 @@ pub const VirtualMachine = struct {
 
                 OpCode.GetSuper => {
                     const name = try self.read_string(frame);
-                    const superclass = (try self.pop()).Obj.as(Class);
+                    const superclass = (try self.pop()).to_obj().as(Class);
 
                     if (!self.bind_method(superclass, name)) {
                         return InterpretError.RuntimeError;
@@ -437,7 +434,7 @@ pub const VirtualMachine = struct {
                 OpCode.SuperInvoke => {
                     const method_name = try self.read_string(frame);
                     const arg_count = self.read_byte(frame);
-                    const superclass = (try self.pop()).Obj.as(Class);
+                    const superclass = (try self.pop()).to_obj().as(Class);
 
                     try self.invoke_from_class(superclass, method_name, arg_count);
 
@@ -475,7 +472,7 @@ pub const VirtualMachine = struct {
 
     fn call_value(self: *VirtualMachine, callee: Value, arg_count: usize) InterpretError!void {
         if (callee.is_obj()) {
-            const obj = callee.Obj;
+            const obj = callee.to_obj();
 
             switch (obj.obj_type) {
                 .Closure => return try self.call(obj.as(Closure), arg_count),
@@ -495,10 +492,10 @@ pub const VirtualMachine = struct {
                     const inst = Instance.init(class, self) catch {
                         return InterpretError.RuntimeError;
                     };
-                    (self.stack_top - arg_count - 1)[0] = Value.obj(inst.as_obj());
+                    (self.stack_top - arg_count - 1)[0] = Value.from_obj(inst.as_obj());
 
                     if (class.methods.get(self.init_string.?.chars)) |initializer| {
-                        try self.call(initializer.Obj.as(Closure), arg_count);
+                        try self.call(initializer.to_obj().as(Closure), arg_count);
                     } else if (arg_count != 0) {
                         // No initializer, but args to the class are provided
                         self.runtime_error("Expected 0 arguments but got {}.", .{arg_count});
@@ -528,7 +525,7 @@ pub const VirtualMachine = struct {
             return InterpretError.RuntimeError;
         };
 
-        return self.call(method.Obj.as(Closure), arg_count);
+        return self.call(method.to_obj().as(Closure), arg_count);
     }
 
     fn invoke(self: *VirtualMachine, name: []const u8, arg_count: u8) InterpretError!void {
@@ -539,7 +536,7 @@ pub const VirtualMachine = struct {
             return InterpretError.RuntimeError;
         }
 
-        const instance = receiver.Obj.as(Instance);
+        const instance = receiver.to_obj().as(Instance);
 
         if (instance.fields.get(name)) |field| {
             (self.stack_top - arg_count - 1)[0] = field;
@@ -555,13 +552,13 @@ pub const VirtualMachine = struct {
             return false;
         };
 
-        const bound = BoundMethod.init(self.peek(0), method.Obj.as(Closure), self) catch {
+        const bound = BoundMethod.init(self.peek(0), method.to_obj().as(Closure), self) catch {
             return false;
         };
         _ = self.pop() catch {
             return false;
         };
-        self.push(Value.obj(bound.as_obj())) catch {
+        self.push(Value.from_obj(bound.as_obj())) catch {
             return false;
         };
 
@@ -621,7 +618,7 @@ pub const VirtualMachine = struct {
 
     fn define_method(self: *VirtualMachine, name: []const u8) InterpretError!void {
         const method: Value = self.peek(0);
-        const class = self.peek(1).Obj.as(Class);
+        const class = self.peek(1).to_obj().as(Class);
         class.methods.put(name, method) catch {
             return InterpretError.RuntimeError;
         };
@@ -656,10 +653,10 @@ pub const VirtualMachine = struct {
     fn define_native(self: *VirtualMachine, name: []const u8, function: *const NativeFn) !void {
         // Push then pop immediately so that the GC keeps them alive
         const name_str = try String.init(name, self);
-        try self.push(Value.obj(name_str.as_obj()));
+        try self.push(Value.from_obj(name_str.as_obj()));
 
         const native = try Native.init(function, self);
-        const native_val = Value.obj(native.as_obj());
+        const native_val = Value.from_obj(native.as_obj());
         try self.push(native_val);
 
         try self.globals.put(name, native_val);
@@ -705,7 +702,7 @@ pub const VirtualMachine = struct {
     }
 
     inline fn read_string(self: *VirtualMachine, frame: *CallFrame) InterpretError![]const u8 {
-        return self.read_constant(frame).Obj.as(String).chars;
+        return self.read_constant(frame).to_obj().as(String).chars;
     }
 
     inline fn binary_op(self: *VirtualMachine, op: OpCode) InterpretError!void {
@@ -715,16 +712,16 @@ pub const VirtualMachine = struct {
         }
 
         // The first-popped value is val2 since it's a stack (LIFO)
-        const val2 = (try self.pop()).Number;
-        const val1 = (try self.pop()).Number;
+        const val2 = (try self.pop()).to_number();
+        const val1 = (try self.pop()).to_number();
 
         const res: Value = switch (op) {
-            OpCode.Add => Value.number(val1 + val2),
-            OpCode.Substract => Value.number(val1 - val2),
-            OpCode.Multiply => Value.number(val1 * val2),
-            OpCode.Divide => Value.number(val1 / val2),
-            OpCode.Greater => Value.boolean(val1 > val2),
-            OpCode.Less => Value.boolean(val1 < val2),
+            OpCode.Add => Value.form_number(val1 + val2),
+            OpCode.Substract => Value.from_number(val1 - val2),
+            OpCode.Multiply => Value.from_number(val1 * val2),
+            OpCode.Divide => Value.from_number(val1 / val2),
+            OpCode.Greater => Value.from_boolean(val1 > val2),
+            OpCode.Less => Value.from_boolean(val1 < val2),
             else => return InterpretError.RuntimeError,
         };
         try self.push(res);
