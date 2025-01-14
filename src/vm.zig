@@ -406,6 +406,43 @@ pub const VirtualMachine = struct {
                     try self.invoke(method_name, arg_count);
                     frame = &self.frames[self.frame_count - 1];
                 },
+
+                OpCode.Inherit => {
+                    if (!self.peek(1).is_class()) {
+                        self.runtime_error("Superclass must be a class.", .{});
+                    }
+
+                    const superclass = self.peek(1).Obj.as(Class);
+                    const subclass = self.peek(0).Obj.as(Class);
+
+                    var iter = superclass.methods.iterator();
+                    while (iter.next()) |kv| {
+                        subclass.methods.put(kv.key_ptr.*, kv.value_ptr.*) catch {
+                            return InterpretError.RuntimeError;
+                        };
+                    }
+
+                    _ = try self.pop();
+                },
+
+                OpCode.GetSuper => {
+                    const name = try self.read_string(frame);
+                    const superclass = (try self.pop()).Obj.as(Class);
+
+                    if (!self.bind_method(superclass, name)) {
+                        return InterpretError.RuntimeError;
+                    }
+                },
+
+                OpCode.SuperInvoke => {
+                    const method_name = try self.read_string(frame);
+                    const arg_count = self.read_byte(frame);
+                    const superclass = (try self.pop()).Obj.as(Class);
+
+                    try self.invoke_from_class(superclass, method_name, arg_count);
+
+                    frame = &self.frames[self.frame_count - 1];
+                },
             }
         }
     }

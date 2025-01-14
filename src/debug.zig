@@ -84,6 +84,9 @@ pub fn disassemble_instruction(chunk: *Chunk, offset: usize) usize {
         OpCode.Class => return constant_instruction("OP_CLASS", chunk, offset),
         OpCode.Method => return constant_instruction("OP_METHOD", chunk, offset),
         OpCode.Invoke => return invoke_instruction("OP_INVOKE", chunk, offset),
+        OpCode.Inherit => return simple_instruction("OP_INHERIT", offset),
+        OpCode.GetSuper => return constant_instruction("OP_GET_SUPER", chunk, offset),
+        OpCode.SuperInvoke => return invoke_instruction("OP_SUPER_INVOKE", chunk, offset),
     }
 }
 

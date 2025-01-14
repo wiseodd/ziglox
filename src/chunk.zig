@@ -39,6 +39,9 @@ pub const OpCode = enum(u8) {
     Class,
     Method,
     Invoke,
+    Inherit,
+    GetSuper,
+    SuperInvoke,
 };
 
 pub const Chunk = struct {
